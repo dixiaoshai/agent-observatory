@@ -1,0 +1,28 @@
+version: 2
+
+updates:
+  # Keep CI actions (checkout/setup-python/setup-node) current.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # React + Vite toolchain lives in frontend/package-lock.json.
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "chore(deps)"
+    open-pull-requests-limit: 5
+    groups:
+      frontend-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]

@@ -1,0 +1,44 @@
+version: 2
+
+updates:
+  # Active workflows live only in the repository root .github/workflows.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "chore(ci)"
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # The root lockfile owns all three Node workspaces; avoid duplicate updates
+  # for the historical standalone module locks.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "chore(deps)"
+    open-pull-requests-limit: 5
+    groups:
+      workspace-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # Stats frontend has an independent manifest and lockfile outside workspaces.
+  - package-ecosystem: "npm"
+    directory: "/packages/agent-stats/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "chore(deps)"
+    open-pull-requests-limit: 5
+    groups:
+      frontend-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]

@@ -1,0 +1,97 @@
+name: Agent Observatory CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  modules:
+    name: Modules and integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.15.0'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python3 -m pip install setuptools wheel
+      - run: npm ci --cache .cache/npm
+      - run: npm run check
+      - name: Rebuild and test Stats frontend
+        run: |
+          npm ci --prefix packages/agent-stats/frontend --cache .cache/npm
+          npm run format:check --prefix packages/agent-stats/frontend
+          npm test --prefix packages/agent-stats/frontend
+          npm run check --prefix packages/agent-stats/frontend
+          npm run build --prefix packages/agent-stats/frontend
+      - run: npm run verify:consumers
+      - run: npm run verify:follow
+      - name: Verify sibling-free source checkouts (no skipped tests)
+        run: npm run verify:sources
+      - name: Verify independent artifact-only installs
+        run: npm run verify:packages
+      - uses: actions/upload-artifact@v4
+        with:
+          name: independent-modules
+          path: artifacts/*
+
+  python:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install setuptools wheel
+      - run: python -m pip install --no-deps --no-build-isolation ./packages/agent-stats
+      - name: Run Stats unit and mocked installer safety tests
+        working-directory: packages/agent-stats
+        run: python -m unittest discover -s tests -p 'test_*.py'
+
+  sensitive:
+    name: Sensitive data scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+      - run: python3 scripts/check-sensitive.py
+
+  ci-success:
+    name: CI success
+    if: always()
+    needs: [modules, python, sensitive]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify all required jobs passed
+        env:
+          MODULES_RESULT: ${{ needs.modules.result }}
+          PYTHON_RESULT: ${{ needs.python.result }}
+          SENSITIVE_RESULT: ${{ needs.sensitive.result }}
+        run: |
+          if [ "$MODULES_RESULT" != "success" ] || [ "$PYTHON_RESULT" != "success" ] || [ "$SENSITIVE_RESULT" != "success" ]; then
+            echo "modules=$MODULES_RESULT python=$PYTHON_RESULT sensitive=$SENSITIVE_RESULT"
+            exit 1
+          fi

@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "timezone": "Asia/Shanghai",
+  "database": "./.agent-journal/journal.sqlite",
+  "trace_url": "http://127.0.0.1:18767",
+  "token_env": "AGENT_TRACE_JOURNAL_TOKEN",
+  "output_directory": "./daily",
+  "projects": [
+    "agent-trace",
+    "agent-stats",
+    "agent-knowledge"
+  ],
+  "page_size": 500,
+  "finalize": {
+    "grace_hours": 6,
+    "max_days_per_run": 7,
+    "late_observed_hours": 36
+  },
+  "budget": {
+    "max_input_tokens_per_day": 120000,
+    "max_output_tokens_per_day": 100000
+  },
+  "model": {
+    "provider": "openai-compatible",
+    "base_url": "https://api.deepseek.com/v1",
+    "model": "deepseek-flash",
+    "api_key_env": "DEEPSEEK_API_KEY",
+    "timeout_seconds": 300,
+    "max_output_tokens": 16000
+  }
+}

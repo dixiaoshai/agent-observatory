@@ -1,0 +1,25 @@
+{
+  "name": "agent-observatory",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Independent tools for agent traces, usage analytics, journals and source-backed knowledge",
+  "workspaces": ["packages/agent-trace", "packages/agent-journal", "packages/agent-knowledge"],
+  "engines": { "node": ">=24.15.0" },
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
+    "test:node": "npm test --workspaces",
+    "test:python": "python3 scripts/check-python.py",
+    "test": "npm run test:node && npm run test:python",
+    "check": "npm run typecheck && npm test && npm run test:tooling && npm run check:sensitive && npm run build",
+    "test:tooling": "python3 -m unittest discover -s scripts/tests -p 'test_*.py' && node --test scripts/tests/*.test.mjs",
+    "check:sensitive": "python3 scripts/check-sensitive.py",
+    "check:privacy": "python3 scripts/check-sensitive.py --strict-privacy",
+    "verify:sources": "node scripts/verify-standalone-sources.mjs",
+    "verify:consumers": "npm run verify:consumers --workspace agent-trace",
+    "verify:follow": "npm run verify:follow --workspace agent-trace",
+    "verify:originals": "python3 scripts/verify-originals.py",
+    "verify:packages": "node scripts/verify-packages.mjs",
+    "pack:modules": "node scripts/pack-modules.mjs"
+  }
+}

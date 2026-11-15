@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "trace_url": "http://127.0.0.1:8766",
+  "token_env": "AGENT_TRACE_KNOWLEDGE_TOKEN",
+  "config": "./agent-knowledge.example.json",
+  "page_size": 200,
+  "idle_seconds": 15,
+  "request_timeout_seconds": 20,
+  "max_backoff_seconds": 300
+}

@@ -1,0 +1,12 @@
+[
+  {"query":"刷新令牌保存在哪里", "path":"knowledge/authentication.md"},
+  {"query":"数据库迁移失败后如何恢复", "path":"knowledge/database.md"},
+  {"query":"灰度发布和错误率回滚规则", "path":"knowledge/release.md"},
+  {"query":"每周完整备份以及保留期限", "path":"knowledge/backup.md"},
+  {"query":"后台任务租约过期后重新领取", "path":"knowledge/queue.md"},
+  {"query":"请求日志记录响应耗时吗", "path":"knowledge/logging.md"},
+  {"query":"商品详情缓存有效期多久", "path":"knowledge/cache.md"},
+  {"query":"支付订单的幂等键", "path":"knowledge/payment.md"},
+  {"query":"revokeSession 删除会话", "path":"code/session.ts"},
+  {"query":"verify_password_hash", "path":"code/hashing.py"}
+]

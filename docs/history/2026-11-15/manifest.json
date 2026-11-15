@@ -1,0 +1,28 @@
+{
+  "schema_version": 2,
+  "snapshot_date": "2026-11-15",
+  "notes": "Historical snapshots for local traceability, not current execution or deployment status. Original source files remain unchanged. Two documents are byte-identical; agent-journal-TODO.md contains one redacted personal home path, so its archive hash (sha256) differs from the pre-redaction source hash (source_sha256).",
+  "documents": [
+    {
+      "source": "../TODO.md",
+      "archive": "docs/history/2026-11-15/workspace-TODO.md",
+      "sha256": "fc8c71a26897c22220149ac89f9f3944e97691dadb57f72fd2dfc130ddcf361c",
+      "bytes": 46347
+    },
+    {
+      "source": "../REVIEW-2026-11-15.md",
+      "archive": "docs/history/2026-11-15/workspace-REVIEW.md",
+      "sha256": "97518de932f000d2b7012cbde94fbef1c09b7957a7b79a39038808e19e75f127",
+      "bytes": 15261
+    },
+    {
+      "source": "../agent-journal/TODO.md",
+      "archive": "docs/history/2026-11-15/agent-journal-TODO.md",
+      "sha256": "ab2ed1f9ee25fa78d3eb441207edb520dd76761d51affb8d3c5198728f39ed03",
+      "bytes": 19454,
+      "source_sha256": "ac9f4ce6978225d799730534d80552e1a94f92d9068b2b980617751c74d0b016",
+      "source_bytes": 19463,
+      "redaction": "One absolute personal home path in the '新 session 起步命令' block was replaced with $HOME; all other bytes are unchanged."
+    }
+  ]
+}

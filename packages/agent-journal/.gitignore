@@ -1,0 +1,19 @@
+node_modules/
+dist/
+.agent-journal/
+daily/
+journal.json
+
+# Workspace handoff notes are kept local (they hold local absolute paths).
+TODO.md
+
+# Defensive: never commit databases, secret files, logs or build caches.
+.DS_Store
+.env
+.env.*
+*.log
+*.sqlite*
+*.sqlite3
+*.pem
+*.key
+*.tsbuildinfo

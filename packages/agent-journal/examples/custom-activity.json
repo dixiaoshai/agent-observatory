@@ -1,0 +1,7 @@
+{
+  "source": "synthetic-demo-v1",
+  "activities": [
+    { "id": "message-1", "project": "demo", "session": "session-1", "at": "2026-01-01T10:00:00.000Z", "kind": "user", "text": "Create a small example." },
+    { "id": "message-2", "project": "demo", "session": "session-1", "at": "2026-01-01T10:02:00.000Z", "kind": "final", "text": "Created the example." }
+  ]
+}

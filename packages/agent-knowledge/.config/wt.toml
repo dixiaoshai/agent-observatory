@@ -1,0 +1,15 @@
+# Worktrunk project hooks — https://worktrunk.dev
+#
+# node_modules/ is copied from an existing worktree via APFS clonefile
+# (72 MB, seconds), so a full `npm ci` per worktree is not needed.
+# Re-run `npm ci` manually after a lockfile change.
+#
+# post-start fires when the branch is created. When adopting an *existing*
+# branch (`wt switch some-old-branch`), run `wt hook post-start` once inside
+# the new worktree to get node_modules.
+
+[[post-start]]
+copy = "wt step copy-ignored"
+
+[pre-merge]
+check = "npm run check"

@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.agent-stats/
+*.sqlite3*
+build/
+dist/
+.DS_Store
+node_modules/
+frontend/*.tsbuildinfo
+
+# Module documentation and synthetic source examples are versioned in the monorepo.
+/legacy-docs/
+/screenshots/

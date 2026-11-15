@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "database": "./.knowrelay/knowledge.sqlite",
+  "allowed_project_ids": ["demo"],
+  "sources": [
+    {
+      "id": "demo",
+      "root": "./fixtures",
+      "project_id": "demo",
+      "include_extensions": [".md", ".ts", ".py"]
+    }
+  ]
+}

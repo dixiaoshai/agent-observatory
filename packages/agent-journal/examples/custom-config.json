@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "timezone": "UTC",
+  "database": "./.agent-journal/custom.sqlite",
+  "output_directory": "./.agent-journal/daily",
+  "projects": ["demo"],
+  "trace_url": "http://127.0.0.1:18767",
+  "token_env": "AGENT_TRACE_JOURNAL_TOKEN"
+}

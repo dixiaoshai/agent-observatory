@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "source": "my-agent",
+  "instance": "laptop",
+  "sessions": [
+    {
+      "id": "synthetic-session-1",
+      "project": "synthetic-project",
+      "started_at": "2026-01-01T10:00:00Z",
+      "turns": [
+        {"id": "turn-1", "started_at": "2026-01-01T10:00:00Z", "model": "example-model", "input_tokens": 100, "cached_input_tokens": 20, "output_tokens": 50, "token_total": 150, "tools": ["search"]}
+      ]
+    }
+  ]
+}
