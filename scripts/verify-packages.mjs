@@ -42,7 +42,9 @@ try {
     assert(listing.includes('package/dist/index.js'));
     assert(listing.includes('package/dist/index.d.ts'));
     assert(!listing.some(p => /(?:^|\/)(?:node_modules|\.git|\.agent-journal|\.knowrelay)(?:\/|$)|\.(?:sqlite3?|pem|key)$/.test(p)));
-    run('npm', ['install', artifact, '--ignore-scripts', '--offline', '--no-audit', '--no-fund', '--package-lock=false', '--cache', cache], dir);
+    // Cache-first so repeated runs are fast, but allow registry fallback: `npm ci`
+    // caches tarballs, not the packuments needed to resolve a tarball's deps.
+    run('npm', ['install', artifact, '--ignore-scripts', '--prefer-offline', '--no-audit', '--no-fund', '--package-lock=false', '--cache', cache], dir);
     const installed = path.join(dir, 'node_modules', name);
     const manifest = JSON.parse(readFileSync(path.join(installed, 'package.json'), 'utf8'));
     for (const other of ['agent-trace', 'agent-journal', 'agent-knowledge']) {
