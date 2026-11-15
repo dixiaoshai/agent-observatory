@@ -12,6 +12,7 @@
  * Codex and pi adapters:
  *
  * - session header          -> session.started
+ * - session/title           -> session.title (display-name update)
  * - turn/start, turn/end    -> turn.started / turn.completed|interrupted
  * - user/message            -> message.user (direct human prompts only)
  * - assistant/message       -> message.assistant + reasoning.summary
@@ -19,6 +20,12 @@
  * - tool/call, tool/result  -> tool.called / tool.returned
  * - compaction/summary      -> context.compacted (+ summarizer usage)
  * - anything else           -> source.unknown
+ *
+ * `session.started` carries the title observed when the file was first read.
+ * Dsh writes a `session/title` record for each display-name revision (the
+ * prompt-derived name, then the model-generated name), so each one becomes a
+ * separate `session.title` event. Consumers prefer the latest non-empty title;
+ * the first event is only a snapshot, never a final name.
  *
  * Dsh logs request-level TokenUsage in assistant messages: `inputTokens`
  * excludes cache reads, like pi. v1 defines input as including cached input.
@@ -386,6 +393,25 @@ export function normalize(
     // copied from the parent log and must not be counted again under the child.
     if (index <= inheritedThrough) continue;
 
+    if (row.type === 'session/title') {
+      // The display name is mutable metadata: the harness records a bounded
+      // prompt fallback first and the model-generated name afterwards. Emit each
+      // revision so consumers can replace the first-observation snapshot on
+      // `session.started` without relying on the mutable sidecar store.
+      const named = title(data?.title);
+      if (named !== null) {
+        add(record, 'session.title', '', {
+          turn_id: null,
+          root_turn_id: null,
+          model: null,
+          title: named,
+        }, null, 'session/title');
+      } else {
+        add(record, 'source.unknown', '', common(activeTurn), null, 'session/title');
+      }
+      continue;
+    }
+
     if (row.type === 'turn/start') {
       activeTurn = turnOf(data);
       add(record, 'turn.started', '', common(activeTurn), null, 'turn/start');
@@ -486,8 +512,8 @@ export function normalize(
       continue;
     }
 
-    // Stream deltas, inbox slices, step boundaries, jobs, approvals, titles and
-    // future event types stay visible as evidence without normalized kinds.
+    // Stream deltas, inbox slices, step boundaries, jobs, approvals and future
+    // event types stay visible as evidence without normalized kinds.
     add(record, 'source.unknown', '', common(activeTurn), null, String(row.type));
   }
   return events;

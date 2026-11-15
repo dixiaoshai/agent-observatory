@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 import { parseArgs, type ParseArgsConfig } from 'node:util';
+import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { Archive, sourceFiles } from './store.ts';
-import { describeServiceConfig, loadServiceConfig } from './config.ts';
+import { describeServiceConfig, loadServiceConfig, projectForCwd } from './config.ts';
+import { acquireCollectionLease, ensureCollectionSchema, releaseCollectionLease, sourceKey } from './collector.ts';
 import { TraceService, type ServiceEvent } from './service.ts';
+import { readSessionTitles, titleLookup, type TitleLookup } from './titles.ts';
 import { ArchiveError, cursorOf, identifier, runtimeHint as parseRuntimeHint, viewOf } from './types.ts';
 import { defaultDatabase } from './paths.ts';
 
@@ -13,6 +16,7 @@ Node.js >=24.15.0; no runtime dependencies; no automatic history import.
 
 Commands (all accept --db PATH, default .agent-trace/trace.sqlite):
   ingest --source PATH [--source PATH ...] --instance ID --project ID [--runtime auto|codex|pi|dsh] [--capture metadata|content]
+  reingest --config PATH [--db PATH]
   export [--after CURSOR] [--limit 1..10000] [--view metadata|content] [--output FILE]
   read --event ID [--view metadata|content]
   delete-session --runtime codex --instance ID --session ID
@@ -22,18 +26,23 @@ Commands (all accept --db PATH, default .agent-trace/trace.sqlite):
   serve --config PATH [--db PATH]
   help
 
-gc removes blob files in the configured content archive that no committed event
-cites (for example files left by an interrupted import); --dry-run only reports.
-Content capture saves selected original prompts, tools and visible reasoning.
-Capture mode is fixed per database; metadata is the default. Export files may
-contain private information and are independent copies with their own lifecycle.
-An existing .agent-archive/archive.sqlite remains the fallback when the new
-default database does not exist. An explicit --db always takes precedence.
-config-check validates a service configuration without creating a database,
-starting collection or opening a listener. serve runs collection and/or the
-read-only loopback API in the foreground until SIGINT/SIGTERM; startup,
-scan and stop events are emitted as NDJSON. See docs/service-config.md and
-docs/local-api.md.
+reingest re-reads every source file the configured collector already imported
+and reconciles the normalized events in place. Use it after an adapter upgrade
+that adds or changes normalized metadata (for example display titles); already
+identical events stay deduplicated, files the harness has since pruned count as missing instead of failing,
+and the collection lease is required, so the
+collector must be stopped first. gc removes blob files in the configured content
+archive that no committed event cites (for example files left by an interrupted
+import); --dry-run only reports. Content capture saves selected original
+prompts, tools and visible reasoning. Capture mode is fixed per database;
+metadata is the default. Export files may contain private information and are
+independent copies with their own lifecycle. An existing
+.agent-archive/archive.sqlite remains the fallback when the new default database
+does not exist. An explicit --db always takes precedence. config-check validates
+a service configuration without creating a database, starting collection or
+opening a listener. serve runs collection and/or the read-only loopback API in
+the foreground until SIGINT/SIGTERM; startup, scan and stop events are emitted
+as NDJSON. See docs/service-config.md and docs/local-api.md.
 `;
 const commandOptions: Record<string, ParseArgsConfig['options']> = {
   ingest: { source: { type: 'string', multiple: true }, instance: { type: 'string' }, project: { type: 'string' }, runtime: { type: 'string' }, capture: { type: 'string' } },
@@ -41,7 +50,8 @@ const commandOptions: Record<string, ParseArgsConfig['options']> = {
   read: { event: { type: 'string' }, view: { type: 'string' } },
   'delete-session': { runtime: { type: 'string' }, instance: { type: 'string' }, session: { type: 'string' } },
   status: {}, gc: { config: { type: 'string' }, 'dry-run': { type: 'boolean' } },
-  'config-check': { config: { type: 'string' } }, serve: { config: { type: 'string' } }, help: {},
+  'config-check': { config: { type: 'string' } }, serve: { config: { type: 'string' } },
+  reingest: { config: { type: 'string' } }, help: {},
 };
 async function main(): Promise<void> {
   const [command = 'help', ...args] = process.argv.slice(2);
@@ -68,7 +78,7 @@ async function main(): Promise<void> {
   if (command === 'export' && (!Number.isSafeInteger(limit) || limit < 1 || limit > 10000)) throw new ArchiveError('INVALID_INPUT', '--limit must be 1..10000');
   const view = viewOf(v.view ?? 'metadata');
   const capture = v.capture === undefined ? undefined : viewOf(v.capture);
-  const configPath = command === 'config-check' || command === 'serve' || command === 'gc'
+  const configPath = command === 'config-check' || command === 'serve' || command === 'gc' || command === 'reingest'
     ? identifier(v.config, '--config') : '';
   let result: unknown;
   if (command === 'serve') {
@@ -100,6 +110,59 @@ async function main(): Promise<void> {
     const config = loadServiceConfig(configPath, { database: typeof v.db === 'string' ? v.db : undefined });
     const archive = new Archive(config.database, undefined, config.content);
     try { result = archive.pruneOrphanBlobs({ dry_run: v['dry-run'] === true }); } finally { archive.close(); }
+  } else if (command === 'reingest') {
+    if (!configPath) throw new ArchiveError('INVALID_INPUT', 'reingest requires --config: the archive, sources and project scopes come from the service configuration');
+    const config = loadServiceConfig(configPath, { database: typeof v.db === 'string' ? v.db : undefined });
+    const archive = new Archive(config.database, config.capture_mode, config.content);
+    const owner = `reingest-${randomUUID()}`;
+    let leased = false;
+    try {
+      ensureCollectionSchema(archive.db);
+      const lease = acquireCollectionLease(archive.db, owner);
+      if (!lease.acquired) {
+        throw new ArchiveError('COLLECTION_BUSY', 'Collection lease is held by another process; stop the collector before running reingest');
+      }
+      leased = true;
+      const sources = new Map(config.collection.sources.map(source => [sourceKey(source), source]));
+      const titles = new Map<string, TitleLookup>();
+      const tracked = archive.db.prepare("SELECT source_key,path FROM collection_files WHERE outcome='imported' ORDER BY path")
+        .all() as Array<{ source_key: string; path: string }>;
+      let imported = 0, skipped = 0, missing = 0;
+      const pending: string[] = [];
+      const errors: Array<{ path: string; code: string }> = [];
+      for (const row of tracked) {
+        const source = sources.get(String(row.source_key));
+        if (!source) { errors.push({ path: String(row.path), code: 'SOURCE_UNCONFIGURED' }); continue; }
+        let lookup = titles.get(String(row.source_key));
+        if (!lookup) {
+          lookup = titleLookup(readSessionTitles(source.root));
+          titles.set(String(row.source_key), lookup);
+        }
+        try {
+          const report = archive.importFile(String(row.path), source.instance_id, cwd => {
+            const match = projectForCwd(source, cwd);
+            if ('error' in match) throw new ArchiveError(match.error, match.message);
+            return match.project_id;
+          }, lookup, source.runtime);
+          imported += report.imported;
+          skipped += report.skipped;
+          if (report.pending) pending.push(String(row.path));
+        } catch (error) {
+          // Harnesses prune their own logs (Codex removes old rollouts) while the
+          // archive keeps their captured evidence. An absent tracked source is
+          // therefore expected on upgrade and not a failure of this command.
+          if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') { missing++; continue; }
+          errors.push({ path: String(row.path), code: error instanceof ArchiveError ? error.code : 'SOURCE_ERROR' });
+        }
+      }
+      result = { archive_id: archive.archiveId, scanned: tracked.length, imported, skipped, missing, pending, errors };
+      if (errors.length) process.exitCode = 1;
+    } finally {
+      if (leased) {
+        try { releaseCollectionLease(archive.db, owner); } catch { /* preserve the original failure */ }
+      }
+      archive.close();
+    }
   } else {
     const archive = new Archive(v.db as string | undefined ?? defaultDatabase(), capture);
     try {

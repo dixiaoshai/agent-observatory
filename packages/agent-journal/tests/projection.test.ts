@@ -16,7 +16,7 @@ function sessionKey(): string {
   return JSON.stringify(['codex', 'fixture-device', SESSION]);
 }
 
-function build(events: StoredEvent[], options: { includeBackfill?: boolean; lastUsage?: StoredEvent | null } = {}): DayBundle {
+function build(events: StoredEvent[], options: { includeBackfill?: boolean; lastUsage?: StoredEvent | null; sessionTitles?: Map<string, string> } = {}): DayBundle {
   const key = sessionKey();
   const started = events.find((event) => event.kind === 'session.started');
   return buildDayBundle({
@@ -24,6 +24,7 @@ function build(events: StoredEvent[], options: { includeBackfill?: boolean; last
     timeZone: 'Asia/Shanghai',
     events,
     sessionStarted: new Map(key && started ? [[key, started]] : []),
+    sessionTitles: options.sessionTitles ?? new Map(),
     lastUsage: new Map([[key, options.lastUsage ?? null]]),
     archiveId: ARCHIVE,
     cursor: 6,
@@ -96,6 +97,21 @@ test('pi/dsh style sessions fall back to assistant answers', () => {
   assert.equal(session.fallback_answers.length, 1);
   assert.equal(session.counts.answers, 1);
   assert.equal(session.open_ended, false);
+});
+
+test('a later session.title revision replaces the started snapshot', () => {
+  const events = baseline();
+  events.push(stored({
+    seq: 7, kind: 'session.title', data: { title: 'Model given name' },
+    occurredAt: '2026-01-01T00:00:06.000Z',
+  }));
+  const bundle = build(events, { sessionTitles: new Map([[sessionKey(), 'Model given name']]) });
+  assert.equal(bundle.sessions[0]!.title, 'Model given name');
+  assert.match(renderDeterministic(bundle), /Model given name/);
+  // A bundle hash changes when the display name changes, so a late revision
+  // invalidates an already generated report instead of silently keeping it.
+  const before = build(baseline());
+  assert.notEqual(bundleInputHash(bundle), bundleInputHash(before));
 });
 
 test('late observed history is excluded unless backfill is explicitly included', () => {

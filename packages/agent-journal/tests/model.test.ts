@@ -27,6 +27,7 @@ function bundleOf(sessions: StoredEvent[][]): DayBundle {
     timeZone: 'Asia/Shanghai',
     events,
     sessionStarted: started,
+    sessionTitles: new Map(),
     lastUsage: new Map(),
     archiveId: ARCHIVE,
     cursor: 99,

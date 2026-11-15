@@ -342,6 +342,27 @@ export class JournalStore {
     return result;
   }
 
+  /**
+   * Latest non-empty display-name revision per session. Trace archives a
+   * `session.started` snapshot and, for harnesses that rename afterwards, a
+   * `session.title` event per revision; a day bundle must show the newest name
+   * even when the revision happened after the day's last event.
+   */
+  latestTitlesFor(sessionKeys: readonly string[]): Map<string, string> {
+    const result = new Map<string, string>();
+    if (!sessionKeys.length) return result;
+    const placeholders = sessionKeys.map(() => '?').join(',');
+    const rows = this.db.prepare(`SELECT * FROM events WHERE kind = 'session.title'
+      AND session_key IN (${placeholders}) ORDER BY COALESCE(occurred_at, observed_at), seq`)
+      .all(...sessionKeys) as unknown as StoredEventRow[];
+    for (const row of rows) {
+      const event = eventFromRow(row);
+      const title = typeof event.data.title === 'string' ? event.data.title.trim() : '';
+      if (title) result.set(event.sessionKey, title);
+    }
+    return result;
+  }
+
   lastUsageFor(sessionKey: string, beforeIso: string): StoredEvent | null {
     const row = this.db.prepare(`SELECT * FROM events WHERE kind = 'usage.snapshot' AND session_key = ?
       AND COALESCE(occurred_at, observed_at) < ? ORDER BY COALESCE(occurred_at, observed_at) DESC, seq DESC LIMIT 1`)

@@ -97,6 +97,8 @@ export interface BuildBundleInput {
   timeZone: string;
   events: StoredEvent[];
   sessionStarted: Map<string, StoredEvent>;
+  /** Newest non-empty `session.title` revision per session, when one exists. */
+  sessionTitles: Map<string, string>;
   lastUsage: Map<string, StoredEvent | null>;
   archiveId: string | null;
   cursor: number;
@@ -155,7 +157,7 @@ function pathsFromArguments(bodyJson: string | null): string[] {
   return [...paths].sort();
 }
 
-function projectSession(sessionKey: string, events: StoredEvent[], started: StoredEvent | undefined, lastUsage: StoredEvent | null | undefined): SessionProjection {
+function projectSession(sessionKey: string, events: StoredEvent[], started: StoredEvent | undefined, latestTitle: string | undefined, lastUsage: StoredEvent | null | undefined): SessionProjection {
   const ordered = [...events].sort((a, b) => a.seq - b.seq);
   const first = ordered[0]!;
   const last = ordered[ordered.length - 1]!;
@@ -165,9 +167,10 @@ function projectSession(sessionKey: string, events: StoredEvent[], started: Stor
   const toolEvents = ordered.filter((event) => event.kind === 'tool.called');
   const returnedEvents = ordered.filter((event) => event.kind === 'tool.returned');
   const usageEvents = ordered.filter((event) => event.kind === 'usage.snapshot');
-  const title = typeof started?.data.title === 'string' && started.data.title
-    ? started.data.title
-    : userEvents.find((event) => typeof event.data.title === 'string' && event.data.title)?.data.title as string | undefined ?? null;
+  const title = latestTitle
+    ?? (typeof started?.data.title === 'string' && started.data.title
+      ? started.data.title
+      : userEvents.find((event) => typeof event.data.title === 'string' && event.data.title)?.data.title as string | undefined ?? null);
 
   const toolCounts: Record<string, number> = {};
   const toolStatuses: Record<string, number> = {};
@@ -320,7 +323,8 @@ export function buildDayBundle(input: BuildBundleInput): DayBundle {
   }
   const sessions: SessionProjection[] = [];
   for (const [sessionKey, events] of bySession) {
-    sessions.push(projectSession(sessionKey, events, input.sessionStarted.get(sessionKey), input.lastUsage.get(sessionKey)));
+    sessions.push(projectSession(sessionKey, events, input.sessionStarted.get(sessionKey),
+      input.sessionTitles.get(sessionKey), input.lastUsage.get(sessionKey)));
   }
   sessions.sort((a, b) => {
     const left = a.started_at ? Date.parse(a.started_at) : 0;

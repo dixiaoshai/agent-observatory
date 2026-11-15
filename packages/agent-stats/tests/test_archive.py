@@ -225,6 +225,41 @@ class ArchiveTests(unittest.TestCase):
         import_batch(self.store, page(0, 7, self.rows))
         self.assertIsNone(self.store.query()['sessions'][0]['title'])
 
+    def test_title_revisions_override_the_first_snapshot(self):
+        titled = json.loads(json.dumps(self.rows))
+        titled[0]['data']['title'] = '首次采集名称'
+        import_batch(self.store, page(0, 7, titled))
+        self.assertEqual(self.store.query()['sessions'][0]['title'], '首次采集名称')
+
+        # A later page can carry only the revised display name.
+        update = record(20, 'session.title', {'title': '模型生成名称'})
+        update['occurred_at'] = '2026-01-02T09:00:00Z'
+        import_batch(self.store, page(7, 21, [update]))
+        self.assertEqual(self.store.query()['sessions'][0]['title'], '模型生成名称')
+
+        # An older revision that arrives late must not replace the newer name.
+        older = record(22, 'session.title', {'title': '旧名称'})
+        older['occurred_at'] = '2026-01-01T09:00:00Z'
+        import_batch(self.store, page(21, 23, [older]))
+        self.assertEqual(self.store.query()['sessions'][0]['title'], '模型生成名称')
+
+        # An empty revision is unknown and never erases a known name.
+        blank = record(24, 'session.title', {'title': '   '})
+        import_batch(self.store, page(23, 25, [blank]))
+        self.assertEqual(self.store.query()['sessions'][0]['title'], '模型生成名称')
+
+    def test_session_title_revision_is_typed_and_bounded(self):
+        bad = record(8, 'session.title', {'title': 'two\nlines'})
+        with self.assertRaises(ValueError):
+            import_batch(self.store, page(0, 8, self.rows + [bad]))
+        too_long = record(8, 'session.title', {'title': 'x' * 81})
+        with self.assertRaises(ValueError):
+            import_batch(self.store, page(0, 8, self.rows + [too_long]))
+        extra = record(8, 'session.title', {'title': 'ok', 'cwd': '/demo'})
+        with self.assertRaises(ValueError):
+            import_batch(self.store, page(0, 8, self.rows + [extra]))
+        self.assertEqual(self.store.db.execute('SELECT count(*) FROM sessions').fetchone()[0], 0)
+
 
     def test_folded_source_series_is_part_of_the_identifier(self):
         start = record(1, 'session.started', {'cwd': '/demo', 'created_at': '2026-01-01T10:00:00Z'})

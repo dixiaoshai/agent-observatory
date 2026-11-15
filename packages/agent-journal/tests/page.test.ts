@@ -48,6 +48,20 @@ test('metadata pages are not accepted by the content-only journal', () => {
   assert.throws(() => validatePage(fixturePage('valid/metadata-empty-page.json'), OPTIONS), (error: unknown) => error instanceof JournalError);
 });
 
+test('accepts session.title revisions as display metadata', () => {
+  const content = validatePage(pageOf([
+    codexEvent({ seq: 1, kind: 'session.started', line: 101, data: { title: 'First name' } }),
+    codexEvent({ seq: 2, kind: 'session.title', line: 102, data: { title: 'Model given name' } }),
+    codexEvent({ seq: 3, kind: 'message.user', line: 103, data: { title: 'Prompt' } }),
+  ]), OPTIONS);
+  assert.deepEqual(content.events.map((event) => event.kind), ['session.started', 'session.title', 'message.user']);
+
+  const unexpected = pageOf([
+    codexEvent({ seq: 1, kind: 'session.title', line: 101, data: { title: 'ok', cwd: '/demo' } }),
+  ]);
+  assert.throws(() => validatePage(unexpected, OPTIONS), isInvalidPage);
+});
+
 test('all invalid fixtures are rejected as permanent errors', () => {
   const manifest = loadFixture('manifest.json') as { fixtures: Array<{ file: string; valid: boolean }> };
   for (const fixture of manifest.fixtures.filter((entry) => !entry.valid)) {

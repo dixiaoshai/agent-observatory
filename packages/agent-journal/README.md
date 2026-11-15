@@ -84,6 +84,7 @@ Codex / pi / dsh 会话日志
 
 - 日窗口：本地时区 `[00:00, 24:00)`；按事件 `occurred_at` 归属，而不是会话开始时间或导入时间。
 - 会话元数据（标题、cwd）按 `session_key` 回查全归档：会话可能在前一晚开始，`session.started` 不在当天窗口内。
+- 会话标题优先使用最新的 `session.title` 修订（dsh 的 prompt 回退名会被模型生成名替换；修订可能发生在当天窗口之后），没有修订时回退 `session.started` 快照。
 - 宽限：`now >= 当天结束 + 6h` 才 finalize，降低“最后一分钟会话还没采集到”的概率。
 - 迟到事件：输入摘要变化时重算并递增 revision，保留历史；删除墓碑到达时把该日标 `stale`，重算并注明“含已撤回会话”。
 - 历史回补：`observed_at - occurred_at > 36h` 的事件只进证据、不自动生成日报；更早的日期需要显式 `--backfill --date`，避免回补旧会话时“补写历史日报”（P0 实测对照日 late ratio = 100%）。
@@ -95,7 +96,8 @@ Codex / pi / dsh 会话日志
 
 | 输入 | 处理 |
 | --- | --- |
-| `session.started` | 标题、cwd、runtime、cli_version；全归档回查 |
+| `session.started` | 首次观测快照：cwd、runtime、cli_version；全归档回查 |
+| `session.title` | 会话标题最新修订，优先于 `session.started` 快照；空修订不覆盖已知名称 |
 | `message.user` | ≤20 条×1,200 字符；过滤 `# AGENTS.md instructions`、`<INSTRUCTIONS>`、`<environment_context>`、`<external_…>` 等注入块 |
 | `turn.completed` | ≤8 条×1,500 字符（codex 最终答复） |
 | `message.assistant` | 无 turn.completed 正文时回退最后 2 条（pi/dsh 终止答复在此），并标记 `answer_source: message.assistant` |

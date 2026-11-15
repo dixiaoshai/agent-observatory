@@ -57,6 +57,7 @@ const REF_KEYS = ['path', 'bytes', 'sha256', 'media_type'];
 const COMMON = ['turn_id', 'root_turn_id', 'model'];
 const KIND_FIELDS: Record<string, string[]> = {
   'session.started': ['cwd', 'parent_session_id', 'forked_from_session_id', 'created_at', 'cli_version', 'title'],
+  'session.title': ['title'],
   'turn.context': [], 'turn.started': [], 'turn.completed': [], 'turn.interrupted': [],
   'message.user': ['title'], 'message.assistant': [], 'reasoning.summary': ['available'],
   'tool.called': ['call_id', 'name', 'input_bytes'],

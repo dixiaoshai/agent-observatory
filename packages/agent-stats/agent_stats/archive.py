@@ -9,6 +9,7 @@ from .codex import FIELDS, summarize_events, timestamp, usage_total
 _COMMON = {'turn_id', 'root_turn_id', 'model'}
 _FIELDS = {
     'session.started': {'cwd', 'parent_session_id', 'forked_from_session_id', 'created_at', 'cli_version', 'title'},
+    'session.title': {'title'},
     'turn.context': set(), 'turn.started': set(), 'turn.completed': set(), 'turn.interrupted': set(),
     'message.user': {'title'}, 'message.assistant': set(), 'reasoning.summary': {'available'},
     'tool.called': {'call_id', 'name', 'input_bytes'},
@@ -130,6 +131,7 @@ def _observation(event):
     kind, data = event['kind'], event['data']
     clean = {name: data.get(name) for name in _COMMON}
     mapping = {
+        'session.title': ('session/title', None),
         'turn.context': ('turn_context', None), 'turn.started': ('event_msg', 'task_started'),
         'turn.completed': ('event_msg', 'task_complete'), 'turn.interrupted': ('event_msg', 'turn_aborted'),
         'usage.snapshot': ('event_msg', 'token_count'), 'message.user': ('event_msg', 'user_message'),
@@ -181,6 +183,27 @@ def _rollout_result(events):
     return (revision_at, len(events)), (result, start)
 
 
+def _display_title(events, fallback):
+    """Newest explicit title revision, or the first-observation snapshot.
+
+    ``session.started`` only carries the title observed when Trace first read
+    the source. A harness such as dsh can revise the display name later, so every
+    revision is archived as a separate ``session.title`` event. Empty or missing
+    revisions are unknown, not a reason to erase a known name.
+    """
+    latest = None
+    for event in events:
+        if event['kind'] != 'session.title':
+            continue
+        value = event.get('data', {}).get('title')
+        if not isinstance(value, str) or not value:
+            continue
+        key = (event.get('occurred_at') or '', event['source']['line'])
+        if latest is None or key > latest[0]:
+            latest = (key, value)
+    return latest[1] if latest else fallback
+
+
 def _rebuild(db, archive_id, session_key):
     rows = db.execute('SELECT body FROM archive_events WHERE archive_id=? AND session_key=? ORDER BY seq',
                       (archive_id, session_key)).fetchall()
@@ -203,7 +226,7 @@ def _rebuild(db, archive_id, session_key):
     for turn in result['turns']:
         turn['native_id'], turn['id'] = turn['id'], json.dumps([session_key, turn['id']], ensure_ascii=False, separators=(',', ':'))
     result['project_name'] = start['project_id']
-    result['title'] = start['data'].get('title')
+    result['title'] = _display_title(events, start['data'].get('title'))
     result['source_path'] = start['source']['path']
     result['received_at'] = datetime.now(timezone.utc).isoformat()
     db.execute('INSERT OR REPLACE INTO sessions VALUES(?,?,?)', (session_key, 0, json.dumps(result, ensure_ascii=False)))

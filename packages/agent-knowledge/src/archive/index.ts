@@ -52,6 +52,7 @@ type Event = z.infer<typeof eventSchema>;
 const common = ['turn_id', 'root_turn_id', 'model'];
 const fields: Record<string, string[]> = {
   'session.started': ['cwd', 'parent_session_id', 'forked_from_session_id', 'created_at', 'cli_version', 'title'],
+  'session.title': ['title'],
   'turn.context': [], 'turn.started': [], 'turn.completed': [], 'turn.interrupted': [],
   'message.user': ['title'], 'message.assistant': [], 'reasoning.summary': ['available'],
   'tool.called': ['call_id', 'name', 'input_bytes'], 'tool.returned': ['call_id', 'output_bytes', 'status'],

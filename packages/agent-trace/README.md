@@ -44,9 +44,12 @@ npm run cli -- export --db .agent-trace/demo.sqlite --view content --limit 10000
 npm run cli -- config-check --config path/to/service.json
 npm run cli -- serve --config path/to/service.json
 npm run cli -- serve --config path/to/service.json --db path/to/pilot.sqlite
+npm run cli -- reingest --config path/to/service.json
 ```
 
 配置要求见[服务配置](docs/service-config.md)，API 授权与错误见[本机 API](docs/local-api.md)。示例默认关闭采集与 API；启用真实来源、正文和网络前必须显式替换路径、`capture_mode` 与 token 摘要。采集与 API 都关闭时 `serve` 拒绝启动。
+
+`reingest` 在适配器升级后重读采集器已导入的文件并原地对账，用于已结束会话不会因为源文件未变而被再次扫描的场景（例如 dsh 的 `session.title` 会话名修订）；它需要采集租约，须先停止 `serve`，重复执行保持幂等。
 
 采集按配置的来源扫描 `.jsonl`：首次 `backfill=none` 只记录基线，之后新文件或变化文件整文件重读并按事件身份去重；`backfill=all` 首次即导入当前文件。归档前按 `session_meta.cwd` 匹配项目，未知或歧义项目跳过并在状态中计数；给来源设置 `unmatched_project_id` 可把未命中会话归入兜底项目，实现“全量采集”。单归档只允许一个采集租约；崩溃后租约过期可接管，重启会从已提交归档和扫描状态继续。
 

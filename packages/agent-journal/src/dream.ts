@@ -82,6 +82,7 @@ export async function dreamDay(
   const events = store.eventsForDay(window.startIso, window.endIso);
   const sessionKeys = [...new Set(events.map((event) => event.sessionKey))];
   const started = store.sessionStartedFor(sessionKeys);
+  const titles = store.latestTitlesFor(sessionKeys);
   const lastUsage = new Map(sessionKeys.map((sessionKey) => [sessionKey, store.lastUsageFor(sessionKey, window.endIso)]));
 
   const bundle = buildDayBundle({
@@ -89,6 +90,7 @@ export async function dreamDay(
     timeZone: config.timezone,
     events,
     sessionStarted: started,
+    sessionTitles: titles,
     lastUsage,
     archiveId: state.archiveId,
     cursor: state.cursor,

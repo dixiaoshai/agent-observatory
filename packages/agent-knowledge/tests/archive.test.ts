@@ -179,6 +179,25 @@ test('pi content events accept native entries and recorded cost', () => {
   store.close();
 });
 
+test('session.title revisions are accepted metadata evidence', () => {
+  const store = new ArchiveEvidenceStore(':memory:', 'owner', ['demo']);
+  const piHash = (seq: number, kind: string) => hash(JSON.stringify(['pi', 'local', 'pi-session', kind, seq]));
+  const title = {
+    schema_version: 1, event_id: piHash(3, 'session.title'), archive_seq: 1,
+    runtime: 'pi', instance_id: 'local', session_id: 'pi-session', session_key: '["pi","local","pi-session"]',
+    project_id: 'demo', kind: 'session.title', occurred_at: '2026-01-01T00:00:02Z',
+    observed_at: '2026-01-01T00:00:02Z', native_type: 'session/title',
+    source: { path: '/gone/pi.jsonl', line: 3, record_hash: hash('pi-title') },
+    data: { turn_id: null, root_turn_id: null, model: null, title: 'Pi session' },
+    body: null, raw: { type: 'session/title', data: { title: 'Pi session' } },
+  };
+  assert.equal(store.importBatch(batch(0, 1, [title])).imported, 1);
+  assert.equal(store.read('archive-a', title.event_id).event.data.title, 'Pi session');
+  const unexpected = { ...title, event_id: piHash(4, 'bad-title'), archive_seq: 2, data: { ...title.data, cwd: '/demo' } };
+  assert.throws(() => store.importBatch(batch(1, 2, [unexpected])));
+  store.close();
+});
+
 test('externalized content references are accepted, verifiable and still scoped', () => {
   const ref = { content_ref: { path: '/private/blobs/abc.txt', bytes: 1234, sha256: hash('external body'), media_type: 'text/plain' } };
   const returned = { ...event(1, 'ignored'), kind: 'tool.returned', native_type: 'response_item.function_call_output',

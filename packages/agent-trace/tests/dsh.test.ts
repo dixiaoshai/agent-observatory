@@ -213,7 +213,7 @@ test('dsh sessions decode concatenated zstd frames and normalize to v1 events', 
     'tool.called',
     'tool.returned',
     'turn.completed',
-    'source.unknown',
+    'session.title',
     'source.unknown',
   ]);
   assert.equal(events[0]!.data.cwd, '/tmp/dsh-project');
@@ -222,6 +222,12 @@ test('dsh sessions decode concatenated zstd frames and normalize to v1 events', 
   // A plain session carries neither `origin` nor `parentSession`.
   assert.equal(events[0]!.data.parent_session_id, null);
   assert.equal(events[0]!.data.forked_from_session_id, null);
+
+  const titled = events.find(event => event.kind === 'session.title')!;
+  assert.equal(titled.native_type, 'session/title');
+  assert.equal(titled.source!.line, 11);
+  assert.equal(titled.data.title, 'Dsh demo');
+  assert.equal(titled.data.turn_id, null);
 
   const user = events.find(event => event.kind === 'message.user')!;
   assert.equal(user.data.turn_id, '1');
@@ -366,4 +372,98 @@ test('dsh seeded subagent keeps its parent attribution and skips inherited work'
     'turn.completed',
   ]);
   assert.ok(!events.some(event => event.kind === 'usage.snapshot'));
+});
+
+/** Display names are revised: prompt fallback first, then the model's name. */
+function titledRows(): unknown[] {
+  return [
+    {
+      type: 'session', version: 4, id: 'session-titled', createdAt: CREATED,
+      cwd: '/tmp/dsh-project', isSeeded: false, delegationDepth: 0, agentPreset: 'standard',
+    },
+    { type: 'turn/start', seq: 1, time: at(1), data: { turn: 1 } },
+    {
+      type: 'user/message', seq: 2, time: at(1),
+      data: { content: [{ type: 'text', text: 'Hello there' }], role: 'user', source: { kind: 'user' } },
+    },
+    { type: 'session/title', seq: 3, time: at(2), data: { title: 'Hello there' } },
+    {
+      type: 'assistant/message', seq: 4, time: at(3),
+      data: {
+        turn: 1,
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Answer' }],
+          source: { kind: 'model', provider: 'deepseek-official', model: 'deepseek-flash' },
+        },
+        usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+      },
+    },
+    { type: 'session/title', seq: 5, time: at(4), data: { title: 'Model given name' } },
+    // An empty revision keeps the prior title and stays raw evidence.
+    { type: 'session/title', seq: 6, time: at(5), data: { title: '   ' } },
+    { type: 'turn/end', seq: 7, time: at(6), data: { turn: 1, reason: { kind: 'completed' } } },
+  ];
+}
+
+test('dsh title revisions become session.title events without freezing the first name', t => {
+  const { filename, archive } = setup(t, 'metadata', encodeRows(titledRows()));
+  assert.equal(archive.importFile(filename, 'device-a', 'demo').imported, 9);
+
+  const events = archive.exportBatch(0, 100, 'metadata').events;
+  const start = events[0]!;
+  assert.equal(start.kind, 'session.started');
+  // The started snapshot carries the newest title known when the file is read.
+  assert.equal(start.data.title, 'Model given name');
+
+  const revisions = events.filter(event => event.kind === 'session.title');
+  assert.deepEqual(revisions.map(event => event.data.title), ['Hello there', 'Model given name']);
+  assert.deepEqual(revisions.map(event => event.source!.line), [4, 6]);
+  assert.ok(revisions.every(event => event.data.turn_id === null && event.native_type === 'session/title'));
+  assert.equal(new Set(revisions.map(event => event.event_id)).size, 2);
+  assert.equal(new Set(events.map(event => event.event_id)).size, events.length);
+
+  const blank = events.find(event => event.native_type === 'session/title' && event.kind === 'source.unknown');
+  assert.ok(blank, 'an unusable title revision stays source.unknown evidence');
+
+  // Re-reading the unchanged file deduplicates every revision by native seq.
+  const again = archive.importFile(filename, 'device-a', 'demo');
+  assert.equal(again.imported, 0);
+  assert.equal(again.skipped, 9);
+});
+
+test('dsh seeded sessions do not repeat inherited title revisions under the child', t => {
+  const items = [
+    {
+      type: 'session', version: 4, id: 'session-seeded', createdAt: CREATED,
+      cwd: '/tmp/dsh-project', parentSession: 'session-parent', isSeeded: true, delegationDepth: 1,
+    },
+    // Inherited prefix: the parent already owns these titles.
+    { type: 'turn/start', seq: 0, time: at(1), data: { turn: 1 } },
+    {
+      type: 'user/message', seq: 1, time: at(1),
+      data: { content: [{ type: 'text', text: 'Inherited prompt' }], role: 'user', source: { kind: 'user' } },
+    },
+    { type: 'session/title', seq: 2, time: at(2), data: { title: 'Inherited name' } },
+    { type: 'turn/end', seq: 3, time: at(3), data: { turn: 1, reason: { kind: 'completed' } } },
+    { type: 'session/end-seed', seq: 4, time: at(3), data: { inherited: true } },
+    // The child's own work starts after the marker.
+    { type: 'turn/start', seq: 5, time: at(4), data: { turn: 2 } },
+    {
+      type: 'user/message', seq: 6, time: at(4),
+      data: { content: [{ type: 'text', text: 'Own prompt' }], role: 'user', source: { kind: 'user' } },
+    },
+    { type: 'session/title', seq: 7, time: at(5), data: { title: 'Own name' } },
+    { type: 'turn/end', seq: 8, time: at(6), data: { turn: 2, reason: { kind: 'completed' } } },
+  ];
+  const events = importRows(t, items);
+  assert.equal(events[0]!.kind, 'session.started');
+  assert.equal(events[0]!.data.forked_from_session_id, 'session-parent');
+  // The started snapshot may summarize inherited names, but only the child's
+  // own revision becomes a session.title event.
+  assert.equal(events[0]!.data.title, 'Own name');
+  const revisions = events.filter(event => event.kind === 'session.title');
+  assert.deepEqual(revisions.map(event => (event.data.title)), ['Own name']);
+  assert.ok(revisions.every(event => event.source!.line >= 9));
+  assert.ok(!events.some(event => event.kind === 'message.user' && event.data.turn_id === '1'));
 });

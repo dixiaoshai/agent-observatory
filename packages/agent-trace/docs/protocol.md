@@ -144,6 +144,7 @@ All ordinary events include nullable `turn_id`, `root_turn_id`, and `model`.
 | Kind | Additional metadata data | Content body |
 |---|---|---|
 | `session.started` | `cwd`, `parent_session_id`, `forked_from_session_id`, `created_at`, `cli_version`, optional `title` (single line, max 80 characters, read beside the source) | null |
+| `session.title` | `title` (single line, max 80 characters) | null |
 | `turn.context` | no additional fields | null |
 | `turn.started` | no additional fields | null |
 | `turn.completed` | no additional fields | optional final answer text (Codex `task_complete.last_agent_message`; pi exposes the terminal answer as `message.assistant`) |
@@ -157,6 +158,15 @@ All ordinary events include nullable `turn_id`, `root_turn_id`, and `model`.
 | `context.compacted` | no additional fields | optional summary |
 | `source.unknown` | no additional fields | null; original in `raw` |
 | `session.deleted` | no additional fields | null |
+
+`session.started.title` is a first-observation snapshot. Harnesses can revise a display
+name after the session starts; each usable revision is a separate `session.title`
+event (the most recent one wins). Consumers that display session names MUST prefer
+the newest non-empty `session.title` and treat missing/empty revisions as unknown
+rather than erasing a known name. This kind never carries body content and does not
+change session identity, parentage or statistics. This kind extends v1: strict
+consumers must be upgraded first; older consumers fail closed instead of adding
+evidence.
 
 Content-mode bodies can contain a `content_ref` object in place of a string that
 exceeded Trace's inline limit:
@@ -182,6 +192,7 @@ reported the charge; `model_rates` means the harness computed it from its own
 model rate table. Consumers must not present the two as account bills, and an
 absent field means unknown, NOT zero. Consumers retain cumulative reset/missing
 evidence and fork inheritance warnings.
+
 A tool return is evidence of an observed result, NOT evidence of task success.
 
 Native `event_msg` messages and `response_item.message` can describe the same
@@ -237,6 +248,7 @@ create extra turns.
 | Dsh event | v1 kind |
 |---|---|
 | `session` header | `session.started` (`created_at` from `createdAt`; `parent_session_id` from `parentSession` when `origin` is `subagent`, else `forked_from_session_id` from `parentSession`) |
+| `session/title` | `session.title` (one event per usable display-name revision) |
 | `turn/start` / `turn/end` | `turn.started` / `turn.completed` or `turn.interrupted` |
 | `user/message` with `source.kind=user` | `message.user` plus a bounded title |
 | other `user/message`, `system/message` | `source.unknown` |
@@ -253,7 +265,16 @@ while historical ordinary forks may retain it there (recorded as
 verbatim copy of the parent log's prefix, closed by a `session/end-seed` record
 carrying `inherited: true`; records through that last marker already exist under
 the parent session and are not normalized again under the child, so inherited
-work is not counted twice.
+work — including title revisions — is not counted twice.
+
+A `session/title` record is a display-name revision: dsh first records a bounded
+prompt fallback and later replaces it with the model-generated name. Each usable
+revision becomes a `session.title` event, while `session.started.title` keeps the
+snapshot observed when the source file was first read. Archives created before
+this kind existed keep their old snapshot until the collector re-reads the file
+or `reingest --config` reconciles the already imported sources (see
+[service configuration](service-config.md)); reingest stays idempotent because
+unchanged rows keep their event identity.
 
 A turn id is the native numeric `data.turn` rendered as a string. Usage follows
 the same v1 input convention as pi:
@@ -275,8 +296,9 @@ is the tool call ID for `tool.called`/`tool.returned` and empty otherwise. Sever
 normalized events from one source row share the row and are distinguished by kind.
 The archive does not retain the native row `seq` separately, so consumers MUST
 validate the 64-hex shape and treat the value as opaque; do not try to recompute
-it from `source.line`. `session/title` supplies the display title, with the
-first direct user prompt as fallback.
+it from `source.line`. `session/title` records supply display-name revisions, with
+the first direct user prompt as the adapter's fallback when no usable title record
+exists.
 
 ## Storage and deletion
 
