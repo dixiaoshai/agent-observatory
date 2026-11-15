@@ -49,7 +49,9 @@ jobs:
 
   python:
     name: Python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
+    # ubuntu-latest (26.04) no longer publishes Python 3.9 builds; pin an LTS
+    # image that still provides the full supported range.
+    runs-on: ubuntu-22.04
     timeout-minutes: 10
     strategy:
       fail-fast: false

@@ -11,7 +11,7 @@
     "test:node": "npm test --workspaces",
     "test:python": "python3 scripts/check-python.py",
     "test": "npm run test:node && npm run test:python",
-    "check": "npm run typecheck && npm test && npm run test:tooling && npm run check:sensitive && npm run build",
+    "check": "npm run typecheck && npm run build && npm test && npm run test:tooling && npm run check:sensitive",
     "test:tooling": "python3 -m unittest discover -s scripts/tests -p 'test_*.py' && node --test scripts/tests/*.test.mjs",
     "check:sensitive": "python3 scripts/check-sensitive.py",
     "check:privacy": "python3 scripts/check-sensitive.py --strict-privacy",

@@ -33,10 +33,11 @@ Stats 后端没有第三方运行时依赖，目前没有 Python 运行时 lock�
 ## 不等于已迁移的项目
 
 - 原仓库远端、PR / Issue、Releases、Secrets、Environments、分支保护、rulesets 与维护权限，不会随文件复制而迁移。
-- 本次未创建 GitHub 仓库、绑定远端、提交、推送或公开任何历史文档。
-- 根 CI 已配置，但尚未在远端 Actions 实际运行；新仓库需要启用 Actions / Dependabot。分支保护应在首次成功运行后由维护者显式设置为要求 `CI success`。
+- 本仓库已创建为公开仓库 [dixiaoshai/agent-observatory](https://github.com/dixiaoshai/agent-observatory)，本地 `origin` 指向它，`main` 为首要分支；原仓库的 PR / Issue / Releases / Secrets / Environments / 分支保护 / rulesets 不会随文件复制而迁移。
+- 根 CI 已随首次推送在远端 Actions 实际运行，并据此修正了两处只在全新克隆环境暴露的问题：根 `check` 改为先 `build` 再 `test`（Knowledge 验收测试会调用 `dist/`），Python 3.9 任务改用 `ubuntu-22.04`（`ubuntu-latest` 已迁移到 26.04，不再提供 3.9）。分支保护仍需维护者在成功运行后显式设置为要求 `CI success`。
 - 已恢复原 CI 的凭证 / 敏感文件扫描、Python 3.9 / 3.13 测试矩阵和前端 format:check，全部纳入 `CI success` 的必过依赖。源码隔离测试拒绝 Node / Python 的 skipped 或零测试，发行包测试在暂存完成后不再读取仓库示例。
-- [根扫描器](../scripts/check-sensitive.py)同时检查历史归档，凭证、敏感文件名、异常文本 NUL 等发现会阻断；仅对具体测试路径中的完全相等合成值设例外。个人路径单独报告隐私警告，公开前必须运行 `npm run check:privacy` 使其成为失败。当前原文归档仍保留一处原机器路径，因此严格隐私检查预期失败，不能宣称已可无审核公开。
-- 扫描为启发式检查，不保证发现所有秘密或解析二进制内容。无 Git 初始化时扫描排除依赖 / 构建目录的源码树；CI 中默认扫描 Git 跟踪文件，暂存前可用 `python3 scripts/check-sensitive.py --all-files`。没有为通过检查而豁免整个历史目录，也没有更改原文快照。
+- [根扫描器](../scripts/check-sensitive.py)同时检查历史归档，凭证、敏感文件名、异常文本 NUL 等发现会阻断；仅对具体测试路径中的完全相等合成值设例外。个人路径单独报告隐私警告，公开前必须运行 `npm run check:privacy` 使其成为失败。原文归档中原有的唯一一处个人主目录路径已脱敏（脱敏前哈希保留在清单的 `source_sha256`），`npm run check:privacy` 现通过；远端 CI 的敏感扫描任务也已通过。
+- 扫描为启发式检查，不保证发现所有秘密或解析二进制内容。无 Git 初始化时扫描排除依赖 / 构建目录的源码树；CI 中默认扫描 Git 跟踪文件，暂存前可用 `python3 scripts/check-sensitive.py --all-files`。没有为通过检查而豁免整个历史目录；仅对 `agent-journal-TODO.md` 的一处个人主目录路径做了脱敏，其余原文快照字节未改。
+- 已知扫描盲区：不检测邮箱、GitHub 用户名、私有仓库链接、图片内容，以及 `~/`、`/private/var`、`/root` 等路径，也不覆盖提交身份。首次公开前已用独立审查补充人工核对（提交图片为合成演示数据、引用的兄弟仓库均为公开仓库、提交使用 GitHub noreply 身份）；后续公开变更仍建议人工复核。
 
 当前执行项见[根 TODO](../TODO.md)，历史依据见[归档索引](history/README.md)。
