@@ -16,7 +16,7 @@ packages/
 
 ## 依赖与数据流
 
-Trace 是默认可选数据来源，不是其他模块的安装依赖。数据流描述的是可选协作，不是包依赖：
+Trace 是默认可选数据来源，不是其他模块的安装依赖。它把显式选定的会话标准化为事件，通过 CLI 批次文件或本机只读分页 API 提供 `metadata` / `content` 视图。数据流描述的是可选协作，不是包依赖：
 
 ```text
 Codex / pi / dsh → Trace → metadata → Stats
@@ -33,9 +33,26 @@ Codex / pi / dsh → Trace → metadata → Stats
 | Journal | JournalActivitySnapshot → 现有日期投影与缓冲 | Trace content client / sync |
 | Knowledge | SourceScanner → 文档完整快照 | 内置文件 scanner；Trace evidence 为独立可选路径 |
 
+## 可选联动的进程与数据边界
+
+各角色可以独立启停；不用 Trace 时，不需要运行下表中的采集或同步进程。
+
+| 角色 | 拥有的数据 | 职责 |
+| --- | --- | --- |
+| Trace metadata `serve` | metadata 归档 | 采集结构、标题、路径和用量，提供 metadata 批次 |
+| Trace content `serve` | 独立 content 归档与 blob 目录 | 为明确选定的项目采集正文，向已授权消费者提供 content 批次 |
+| Stats `follow` / `import-archive` | Stats 统计库与游标 | 把 metadata 转为统计；常驻拉取时由 `follow` 持有写入租约 |
+| Stats `serve --archive-only` | 读取 Stats 统计库 | 只读看板，不扫描源日志或推进游标；可按需只读显式配置的 Trace content 库 |
+| Knowledge `follow` / `archive-import` | 独立证据库 `<知识库文件>.archive-evidence.sqlite` 与游标 | 写入执行证据投影，与文档索引分离；CLI / MCP 可独立读取，不必随 worker 常驻 |
+| Journal `run` | Journal 数据库与日报目录 | 按本地日拉取 content 增量并生成日报，由 Journal 自己调度，不由 Trace 触发 |
+
+一份 Trace 配置只对应一个数据库和一种固定捕获模式；同时保留两种捕获策略时，应分别使用数据库、项目范围、API 端口与 token。Trace 不推送事件，不管理消费进度。删除先在归档中写入墓碑，各消费方读到后分别清理自己的投影，既有导出和备份不会自动清除。
+
+参见 [Trace 内部架构](../packages/agent-trace/docs/ARCHITECTURE.md)、[跨模块消费指南](TRACE-CONSUMERS.md)和[安装器安全说明](SAFETY.md)。
+
 ## 数据源接入契约
 
-需要完整执行证据时，使用可选 Trace 的[采集说明](../packages/agent-trace/README.md)与[协议](../packages/agent-trace/docs/protocol.md)。metadata 与 content 数据库 / 权限应明确分离，消费方各自维护游标。新 provider 不应通过读取其他模块 SQLite 表来省略接口边界。
+需要完整执行证据时，使用可选 Trace 的[采集说明](../packages/agent-trace/README.md)与[协议](../packages/agent-trace/docs/PROTOCOL.md)。metadata 与 content 数据库 / 权限应明确分离，消费方各自维护游标。新 provider 不应通过读取其他模块 SQLite 表来省略接口边界。
 
 ### Stats：标准化 session 快照
 
@@ -91,6 +108,6 @@ Codex / pi / dsh → Trace → metadata → Stats
 
 ## 共享模型与拆仓库
 
-现有 Python 与 TypeScript 跨语言、各消费方领域不同。抽取一个运行时公共包只会增加安装与版本耦合。当前共享的是上面列出的接入约定、Trace 的[协议文档](../packages/agent-trace/docs/protocol.md)与合成 fixtures；没有新建必装 core。未来确有稳定共享模型时，再抽取小范围版本化 JSON Schema 或类型，不让消费者导入 Trace 内部实现。
+现有 Python 与 TypeScript 跨语言、各消费方领域不同。抽取一个运行时公共包只会增加安装与版本耦合。当前共享的是上面列出的接入约定、Trace 的[协议文档](../packages/agent-trace/docs/PROTOCOL.md)与合成 fixtures；没有新建必装 core。未来确有稳定共享模型时，再抽取小范围版本化 JSON Schema 或类型，不让消费者导入 Trace 内部实现。
 
 出现独立团队 / 权限、不同授权、互不相关的发布周期或需要独立源码分发时再拆仓库。保持每包独立构建、入口和文档，未来拆分不需要重写领域逻辑。

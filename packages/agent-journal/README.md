@@ -27,7 +27,7 @@ Codex / pi / dsh 会话日志
 daily/ ── 文件集成 ──→ agent-knowledge 的 source 目录
 ```
 
-- **Trace content 输入**：`sync` 只调用 `GET /v1/status` 和 `GET /v1/events?view=content`，不读 Trace 数据库，也不读宿主原始日志。共享协议与消费约定见 [Trace 协议](../agent-trace/docs/protocol.md)和[消费方 follow 约定](../agent-trace/docs/consumer-follow.md)。
+- **Trace content 输入**：`sync` 只调用 `GET /v1/status` 和 `GET /v1/events?view=content`，不读 Trace 数据库，也不读宿主原始日志。共享协议与消费约定见 [Trace 协议](../agent-trace/docs/PROTOCOL.md)和[消费方接入与同步](../../docs/TRACE-CONSUMERS.md)。
 - **离线活动输入**：`import` 读取完整追加式活动 JSON，适合没有 Trace 的环境；格式、限制与示例见[离线数据源](docs/SOURCES.md)。
 - **产物**：Markdown 日报写入 `output_directory`；`--today` 只写预览。SQLite 保存游标、有界投影、日状态和运行记录。
 - **Knowledge 集成**：只通过文件集成。日报写入目录后由 Knowledge 作为普通 source 索引；Knowledge 需要 source 级 `generated: true` 标记来区分模型生成物，该能力当前未实现，因此日报暂不应作为事实来源被索引。
@@ -229,5 +229,5 @@ Journal 使用自己的 SQLite（默认权限 0600）：
 
 - [离线数据源](docs/SOURCES.md)：活动快照格式、追加语义、独立运行示例。
 - [合成协议 fixtures](tests/fixtures/README.md)：Journal 测试使用的 Trace 协议样例副本。
-- [Trace 协议](../agent-trace/docs/protocol.md)、[消费方 follow 约定](../agent-trace/docs/consumer-follow.md)：共享的数据输入契约。
+- [Trace 协议](../agent-trace/docs/PROTOCOL.md)、[消费方接入与同步](../../docs/TRACE-CONSUMERS.md)：共享的数据输入契约。
 - 根文档：[架构](../../docs/ARCHITECTURE.md)、[开发指南](../../docs/DEVELOPMENT.md)、[安全说明](../../docs/SAFETY.md)、[命名规则](../../docs/NAMING.md)、[当前任务](../../TODO.md)。

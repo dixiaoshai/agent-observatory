@@ -29,7 +29,7 @@ python3 -m agent_stats --db .agent-stats/stats.sqlite3 serve --source ~/.codex/s
 
 ## 自动跟随 Trace（可选）
 
-Trace 侧先按[服务配置](../../agent-trace/docs/service-config.md)启动 `serve --config`，为 Stats 客户端只授权 `metadata` 视图，并生成 bearer token。明文 token 只放进环境变量。示例配置见 [agent-stats.follow.example.json](../agent-stats.follow.example.json)：
+Trace 侧先按[服务配置](../../agent-trace/docs/SERVICE-CONFIG.md)启动 `serve --config`，为 Stats 客户端只授权 `metadata` 视图，并生成 bearer token。明文 token 只放进环境变量。示例配置见 [agent-stats.follow.example.json](../agent-stats.follow.example.json)：
 
 ```json
 {

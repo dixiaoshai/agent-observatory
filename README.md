@@ -63,7 +63,7 @@ node packages/agent-journal/dist/cli.js dream --config .agent-observatory-demo/j
 node packages/agent-knowledge/examples/memory-scanner.mjs
 ```
 
-示例创建临时库、注入内存 scanner、检索合成知识并清理临时目录，不需要 Trace。要索引本地文件，见[本地使用说明](packages/agent-knowledge/docs/running.md)。
+示例创建临时库、注入内存 scanner、检索合成知识并清理临时目录，不需要 Trace。要索引本地文件，见[本地使用说明](packages/agent-knowledge/docs/RUNNING.md)。
 
 ## 只安装一个模块
 
@@ -89,6 +89,7 @@ Git monorepo 默认仍会 clone 全仓库；独立发行包解决的是安装范
 ## 文档
 
 - [架构与依赖边界](docs/ARCHITECTURE.md)
+- [Trace 跨模块消费：批次导入、持续同步与删除传播](docs/TRACE-CONSUMERS.md)
 - [开发、验证、CI 与发布](docs/DEVELOPMENT.md)
 - [安装器安全与服务隔离](docs/SAFETY.md)
 - [命名规则](docs/NAMING.md)

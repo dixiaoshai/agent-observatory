@@ -1,14 +1,14 @@
 # 共享 Agent 归档协议 v1
 
-本协议描述 Agent Trace 与各消费方之间的批次契约。Codex、pi 与 DeepSeek Harness（`dsh`）适配器均已实现。Trace 不安装宿主 hook 或运行时集成，只读取宿主已经写入的会话文件；content 的 launchd 安装器只托管本模块自己的采集服务。dsh 当前日志是拼接的 Zstandard 帧，解析前会解码为逻辑 JSONL。
+本协议描述 Agent Trace 与各消费方之间的批次契约。Trace 不安装宿主 hook，只读取 Codex、pi 与 DeepSeek Harness（`dsh`）已经写入的会话文件。dsh 日志是拼接的 Zstandard 帧，解析前会解码为逻辑 JSONL。
 
 ## 所有权与传输
 
-归档拥有捕获的源证据与归一化事件。Agent Stats 拥有统计结果；Agent Knowledge 拥有可检索证据以及后续派生的记忆；Agent Journal 拥有按日回顾产物。消费方从不写归档的 SQLite 表，各自实现自己的消费者；它们共享本契约而不是代码。协议一致性 fixtures 位于 [fixtures/protocol/](../fixtures/protocol/README.md)，消费方应在自己的测试中运行同一组用例。
+归档拥有捕获的源证据与归一化事件；消费方拥有自己的派生结果与游标，不写归档的 SQLite 表。消费方共享本契约而不是代码；仓库源码中的 [协议一致性样本](../fixtures/protocol/README.md)用于验证不同实现。
 
-第一种传输是 CLI 导出的 JSON 批次文件，使 Python 与 TypeScript 消费方能共享版本化契约而不共享内部数据库模式。第二种传输是只读的本机 HTTP 事件流，由各消费方独立拉取；端点、认证、视图和错误契约固定在[本机 API 文档](local-api.md)，服务端由 `agent-trace serve` 实现。Stats、Knowledge 与 Journal 的同步逻辑均已实现，Trace 不保存目标清单、投递队列或消费方确认状态。
+第一种传输是 CLI 导出的 JSON 批次文件，使 Python 与 TypeScript 消费方能共享版本化契约而不共享内部数据库模式。第二种传输是只读的本机 HTTP 事件流，由各消费方独立拉取；端点、认证、视图和错误契约固定在[本机 API 文档](LOCAL-API.md)，服务端由 `agent-trace serve` 实现。Stats、Knowledge 与 Journal 的同步逻辑均已实现，Trace 不保存目标清单、投递队列或消费方确认状态。
 
-归档要求显式提供来源路径、实例 ID 和项目 ID，不会自动发现或导入用户历史。数据库的捕获模式在创建时固定：默认 `metadata`，只有显式选择时才为 `content`。metadata 包含有长度上限的请求标题和路径，仍属私密信息。content 捕获包含请求、回答、可见推理摘要、计划和工具参数 / 结果。入库前，常见凭据形态和敏感命名的 JSON 字段会被替换为显式 `[REDACTED:<类别>]` 标记，超大字符串外置为可核验的本地引用（见[正文归档](content-capture.md)）。脱敏是启发式的：它不能恢复隐藏 / 加密推理，也不能证明自由散文或私有格式中没有密钥；选择来源时应考虑这一点。归档过程不发起外部网络调用或模型调用。
+归档要求显式提供来源路径、实例 ID 和项目 ID，不会自动发现或导入用户历史。数据库的捕获模式在创建时固定：默认 `metadata`，只有显式选择时才为 `content`。metadata 包含有长度上限的请求标题和路径，仍属私密信息。content 捕获包含请求、回答、可见推理摘要、计划和工具参数 / 结果。入库前，常见凭据形态和敏感命名的 JSON 字段会被替换为显式 `[REDACTED:<类别>]` 标记，超大字符串外置为可核验的本地引用（见[正文归档](CONTENT-CAPTURE.md)）。脱敏是启发式的：它不能恢复隐藏 / 加密推理，也不能证明自由散文或私有格式中没有密钥；选择来源时应考虑这一点。归档过程不发起外部网络调用或模型调用。
 
 ## 批次信封
 
@@ -147,7 +147,7 @@ dsh 保存会话 header 加追加式 `SessionEvent` 日志。当前版本在 `~/
 
 dsh 会话 header 用可选字段自我分类：`origin` 只可能是 `subagent`；子代理的 `parentSession` 是其直接创建者（`parent_session_id`），不是 fork 来源；普通 fork 省略 `parentSession`，而历史普通 fork 可能在其中保留它（记录为 `forked_from_session_id`）。seeded 会话（`isSeeded: true`）以父日志前缀的逐字副本开始，由一条携带 `inherited: true` 的 `session/end-seed` 记录收尾；到最后一个 marker 为止的记录已存在于父会话下，不会在子会话下再次归一化，因此继承工作（包括标题修订）不会被计两次。
 
-`session/title` 记录是显示名修订：dsh 先记录一个有界提示回退，随后替换为模型生成的名称。每个可用修订变成一条 `session.title` 事件，而 `session.started.title` 保留首次读取源文件时观测到的快照。该 kind 出现前创建的归档会保留旧快照，直到采集器重新读取文件，或 `reingest --config` 协调已导入来源（见[服务配置](service-config.md)）；reingest 因未变化行保持事件身份而保持幂等。
+`session/title` 记录是显示名修订：dsh 先记录一个有界提示回退，随后替换为模型生成的名称。每个可用修订变成一条 `session.title` 事件，而 `session.started.title` 保留首次读取源文件时观测到的快照。该 kind 出现前创建的归档会保留旧快照，直到采集器重新读取文件，或 `reingest --config` 协调已导入来源（见[服务配置](SERVICE-CONFIG.md)）；reingest 因未变化行保持事件身份而保持幂等。
 
 turn id 是原生数字 `data.turn` 渲染成的字符串。用量遵循与 pi 相同的 v1 输入约定：
 
@@ -166,7 +166,7 @@ dsh 不在会话日志中记录请求成本，因此 `cost_usd` 与 `cost_source
 
 SQLite 是唯一的初始归档写入者，把正文与归一化事件放在同一事务中存储。只接受完整的 LF 结尾记录；不完整尾部报告为 pending 并在之后重试。dsh 压缩来源在最后一帧撕裂时仍接受完整的 Zstandard 帧。畸形的完整记录会使该文件导入原子失败。文件与解码后大小都有限制。当前重复扫描会重读选定文件；事件去重与消费方导出是增量的，字节偏移 tail 延后。全局 / 会话顺序得到保留；不声明跨独立运行时的全局墙钟顺序。
 
-第一种传输没有按范围过滤的事件流。Agent Knowledge 必须被授权读取导入页内的每个项目，否则拒绝整个事务。更窄的采集范围应部署独立归档；不要手工删掉未授权事件而保留全局游标。本机 HTTP 事件流要求回环 Host / Origin 和带明确视图的 bearer token，同样不提供按项目过滤。解析后的 `raw` 值无法复现源行的空白 / 编码，因此消费方把 `record_hash` 保留为归档的来源声明，而不是独立验证的字节哈希。
+CLI 和本机 HTTP 都不按项目过滤；HTTP 要求回环 Host / Origin 和带明确视图的 bearer token。需要按项目隔离读取范围时使用独立归档，不要手工删除页内事件而保留全局游标。解析后的 `raw` 值无法复现源行的空白 / 编码，因此 `record_hash` 是归档的来源声明，而不是从批次独立验证的字节哈希。
 
 `delete-session` 删除捕获事件（包括 body / raw）及其引用的任何 blob 文件，并在同一事务中追加 `session.deleted` 墓碑。已删除会话不能被静默重新导入。这是追加式历史中的显式擦除例外。其事件 ID 是 `SHA256(JSON.stringify([runtime, instance_id, session_id, "deleted"]))`，source / body / raw 为 null，data 为空。同一个 marker 不能出现在另一个序列位置；页面重试仍然有效。消费方必须事务性地删除对应证据 / 统计并推进游标。删除前生成的导出、消费方备份、外置 blob 副本和文件系统副本都是独立副本，需要各自清理；这不是安全擦除保证。在归档事务之前写入、随后事务回滚的 blob 是无引用孤儿，可通过目录审计删除。新消费方即使先前事件已被删除，也会看到墓碑。
 

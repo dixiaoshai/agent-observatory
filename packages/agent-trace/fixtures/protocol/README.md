@@ -1,6 +1,6 @@
 # 协议 v1 一致性 fixtures
 
-状态：草案，尚未接入任何消费方的 CI。维护者：Agent Trace。协议参考：[`docs/protocol.md`](../../docs/protocol.md)；传输与消费方行为见 [`docs/local-api.md`](../../docs/local-api.md) 与 [`docs/consumer-follow.md`](../../docs/consumer-follow.md)。
+状态：草案，尚未接入任何消费方的 CI。维护者：Agent Trace。协议参考：[`docs/PROTOCOL.md`](../../docs/PROTOCOL.md)；传输与消费方行为见 [`docs/LOCAL-API.md`](../../docs/LOCAL-API.md) 与 [消费方接入与同步](../../../../docs/TRACE-CONSUMERS.md)。
 
 这些 fixtures 描述所有归档消费方（Agent Stats、Agent Knowledge、Agent Journal）共享的**页面契约**。它们很小且完全合成：不含真实会话内容、路径或凭据。它们的存在是为了让每个消费方用**同一组**接受 / 拒绝语料测试**自己的**校验器，而无需导入另一个消费方的代码。
 
@@ -21,7 +21,7 @@ generate.mjs                   # 唯一事实来源；修改后重新运行
 
 1. 加载 `manifest.json`。
 2. 对每个 `valid` fixture：用全新状态喂给你的页面校验器，预期接受。对 `content-page-1.json` 之后接 `content-deletion-page.json`，预期游标从 `6` 前进到 `7`，会话证据被移除，且重放的旧页不会让它复活。
-3. 对每个 `invalid` fixture：预期**永久**拒绝，游标不推进且不发生部分写入。`expected_code` 把语义失败映射到 `consumer-follow.md` 中的错误码；如果你的消费方使用不同名称，可自行翻译（Knowledge 的手动导入器对所有情况都报 `INVALID_ARCHIVE`）。
+3. 对每个 `invalid` fixture：预期**永久**拒绝，游标不推进且不发生部分写入。`expected_code` 把语义失败映射到 消费方接入与同步文档中的错误码；如果你的消费方使用不同名称，可自行翻译（Knowledge 的手动导入器对所有情况都报 `INVALID_ARCHIVE`）。
 4. 不要把 fixtures 导入生产存储，也不要在保留 manifest 结果的前提下把它们复制进消费方自己的测试数据。
 
 两种传输共享同一契约：CLI `export` 文件与 HTTP `/v1/events` 页具有相同的信封、事件身份和游标语义。

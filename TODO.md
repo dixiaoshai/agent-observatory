@@ -75,5 +75,5 @@
 ## 当前实现基线
 
 - [x] pi / dsh 保留逐调用观测身份与字段缺失，区分零、已知小计、观测完整量和未知实际请求总量；记录费用和 API 等价估算分列，旧/混合归档保守隔离。契约见[Stats 数据源](packages/agent-stats/docs/SOURCES.md)。
-- [x] Trace 归档记录 `normalizer_version`，跨版本写入与 `serve` 用 `PROJECTION_MISMATCH` 拒绝，`status` 暴露版本；语义升级须显式用新库重建，不包含事件修订修复。契约见[Trace 协议](packages/agent-trace/docs/protocol.md)。
+- [x] Trace 归档记录 `normalizer_version`，跨版本写入与 `serve` 用 `PROJECTION_MISMATCH` 拒绝，`status` 暴露版本；语义升级须显式用新库重建，不包含事件修订修复。契约见[Trace 协议](packages/agent-trace/docs/PROTOCOL.md)。
 - [x] 四模块保有独立输入、源码检查与发行包；Stats 可禁用正文，Journal 可离线导入并生成无模型日报，Knowledge 可直接索引文件。独立安装与安装器副作用防护按[开发指南](docs/DEVELOPMENT.md)的命令验证。
