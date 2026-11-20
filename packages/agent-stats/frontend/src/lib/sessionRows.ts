@@ -129,3 +129,39 @@ export function sessionRowCount<S extends SessionRowLike, T extends { id: string
   }
   return count;
 }
+
+/** Turn fields needed to find a session's first turn; testable with plain objects. */
+export type FirstTurnLike = {
+  session_id?: string | null;
+  sequence?: number | null;
+  started_at?: string | null;
+};
+
+const sequenceOrder = (value?: number | null) => value ?? Number.POSITIVE_INFINITY;
+const startOrder = (value?: string | null) => {
+  const time = value ? Date.parse(value) : Number.NaN;
+  return Number.isNaN(time) ? Number.POSITIVE_INFINITY : time;
+};
+
+/**
+ * Earliest turn of every session by `sequence`, falling back to start time;
+ * ties keep the input order so the displayed prompt stays stable. The row sort
+ * must not change which prompt counts as the session's first one.
+ */
+export function firstTurnsBySession<T extends FirstTurnLike>(turns: T[]): Map<string, T> {
+  const first = new Map<string, T>();
+  for (const turn of turns) {
+    const sessionId = turn.session_id;
+    if (!sessionId) continue;
+    const current = first.get(sessionId);
+    if (
+      !current ||
+      sequenceOrder(turn.sequence) < sequenceOrder(current.sequence) ||
+      (sequenceOrder(turn.sequence) === sequenceOrder(current.sequence) &&
+        startOrder(turn.started_at) < startOrder(current.started_at))
+    ) {
+      first.set(sessionId, turn);
+    }
+  }
+  return first;
+}

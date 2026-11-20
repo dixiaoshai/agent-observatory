@@ -11,6 +11,13 @@ export const sessionSourceBadge = (source: string | null | undefined) => {
   if (!value) return '未知';
   return SOURCE_BADGES[value.toLocaleLowerCase()] ?? value.toLocaleUpperCase();
 };
+const AGENT_LABELS: Record<string, string> = { codex: 'Codex', pi: 'pi' };
+/** Agent label shared by the global filter and the per-row Agent column. */
+export const agentLabel = (source: string | null | undefined) => {
+  const value = (source ?? '').trim();
+  if (!value) return '未知';
+  return AGENT_LABELS[value.toLocaleLowerCase()] ?? value;
+};
 export const projectName = (project: { project?: string | null; project_name?: string | null }) =>
   project.project_name ||
   project.project

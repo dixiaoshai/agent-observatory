@@ -1,3 +1,5 @@
+import { agentLabel } from '../lib/format';
+
 export interface FilterControls {
   range: string;
   source: string;
@@ -6,9 +8,6 @@ export interface FilterControls {
   start: string;
   end: string;
 }
-
-const AGENT_LABELS: Record<string, string> = { codex: 'Codex', pi: 'pi' };
-const agentLabel = (source: string) => AGENT_LABELS[source] ?? source;
 
 export interface ProjectOption {
   path: string;

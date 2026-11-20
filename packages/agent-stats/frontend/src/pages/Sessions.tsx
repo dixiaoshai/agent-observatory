@@ -4,6 +4,7 @@ import type { Overview, Selection, Session, Turn } from '../types';
 import { buildSessionTree, type SessionNode } from '../lib/sessionTree';
 import { buildTurnTree, type TurnNode } from '../lib/turnTree';
 import {
+  firstTurnsBySession,
   flattenSessionRows,
   flattenTurns,
   sessionRowCount,
@@ -12,6 +13,7 @@ import {
 } from '../lib/sessionRows';
 import { workspaceColor } from '../lib/workspaceColor';
 import {
+  agentLabel,
   cacheRate,
   formatCost,
   formatDate,
@@ -63,6 +65,8 @@ export function Sessions({ data, onSelect }: { data: Overview; onSelect: (s: Sel
       .slice()
       .sort((a, b) => compare(a, b, sort));
   }, [data, unit, sort, search]);
+  // The session row prompt is the first turn's prompt, not the first sorted row.
+  const firstTurns = useMemo(() => firstTurnsBySession(data.turns), [data.turns]);
   const turnTree = useMemo(
     () =>
       buildTurnTree(
@@ -218,6 +222,7 @@ export function Sessions({ data, onSelect }: { data: Overview; onSelect: (s: Sel
             <SessionTable
               rows={visibleSessionEntries}
               sessions={data.sessions}
+              firstTurns={firstTurns}
               expanded={expanded}
               onToggle={(id) =>
                 setExpanded((previous) => {
@@ -336,6 +341,7 @@ function TurnTable({
         <tr>
           {[
             '轮次 / 会话',
+            'Agent',
             '模型',
             '工作区',
             '时间',
@@ -381,6 +387,7 @@ function TurnTable({
                   轮次 ID：{t.native_id}
                 </small>
               </td>
+              <td title={t.source || undefined}>{agentLabel(t.source)}</td>
               <td>{t.model}</td>
               <td>
                 <span className="project-name" title={t.project || undefined}>
@@ -430,12 +437,14 @@ function TurnTable({
 function SessionTable({
   rows,
   sessions,
+  firstTurns,
   expanded,
   onToggle,
   onSelect,
 }: {
   rows: SessionRowEntry<Session, Turn>[];
   sessions: Session[];
+  firstTurns: Map<string, Turn>;
   expanded: Set<string>;
   onToggle: (id: string) => void;
   onSelect: (s: Selection) => void;
@@ -450,8 +459,9 @@ function SessionTable({
       <thead>
         <tr>
           {[
-            '会话 / Agent 轮次',
+            '会话 / 轮次',
             '开始时间',
+            'Agent',
             '模型',
             '工作区',
             'Prompt',
@@ -473,6 +483,7 @@ function SessionTable({
             const s = entry.session;
             const isExpanded = expanded.has(s.id);
             const childCount = entry.childSessions.length;
+            const firstTurn = firstTurns.get(s.id);
             return (
               <tr
                 key={s.id}
@@ -509,6 +520,7 @@ function SessionTable({
                   )}
                 </td>
                 <td>{formatDate(s.started_at)}</td>
+                <td title={s.source || undefined}>{agentLabel(s.source)}</td>
                 <td>{s.model}</td>
                 <td>
                   <span className="project-name" title={s.project || undefined}>
@@ -516,7 +528,11 @@ function SessionTable({
                   </span>
                 </td>
                 <td className="prompt-cell">
-                  <span className="muted">—</span>
+                  {firstTurn ? (
+                    <span title={turnName(firstTurn)}>{turnName(firstTurn)}</span>
+                  ) : (
+                    <span className="muted">—</span>
+                  )}
                 </td>
                 <td>{formatNumber(s.turns)}</td>
                 <td>
@@ -596,6 +612,7 @@ function SessionTable({
                 />
               </td>
               <td>{formatDate(turn.started_at)}</td>
+              <td title={turn.source || undefined}>{agentLabel(turn.source)}</td>
               <td>{turn.model}</td>
               <td>
                 <span className="project-name" title={turn.project || undefined}>

@@ -2,7 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildSessionTree } from '../src/lib/sessionTree.ts';
 import { buildTurnTree } from '../src/lib/turnTree.ts';
-import { flattenSessionRows, flattenTurns, sessionRowCount } from '../src/lib/sessionRows.ts';
+import {
+  firstTurnsBySession,
+  flattenSessionRows,
+  flattenTurns,
+  sessionRowCount,
+} from '../src/lib/sessionRows.ts';
 
 const session = (id, parent_id = null, turns = 1) => ({ id, parent_id, turns });
 const turn = (id, parent_turn_id = null, session_id = null) => ({
@@ -247,4 +252,39 @@ test('flattens turn trees with collapsed branches hidden', () => {
     ['child', 1],
   ]);
   assert.deepEqual(shape(flattenTurns(tree, new Set(), 3)), [['root', 3]]);
+});
+
+const turnPrompt = (id, session_id, sequence, started_at = null) => ({
+  id,
+  session_id,
+  sequence,
+  started_at,
+});
+
+test('selects each session first turn by sequence, not by input or row sort order', () => {
+  const turns = [
+    turnPrompt('b-3', 'b', 3),
+    turnPrompt('a-2', 'a', 2),
+    turnPrompt('b-1', 'b', 1),
+    turnPrompt('a-1', 'a', 1),
+  ];
+  const first = firstTurnsBySession(turns);
+  assert.equal(first.get('a').id, 'a-1');
+  assert.equal(first.get('b').id, 'b-1');
+});
+
+test('falls back to start time when a sequence is missing and skips unowned turns', () => {
+  const turns = [
+    turnPrompt('late', 's', null, '2026-11-02T10:00:00+08:00'),
+    turnPrompt('early', 's', null, '2026-11-01T10:00:00+08:00'),
+    turnPrompt('unowned', null, 0),
+  ];
+  const first = firstTurnsBySession(turns);
+  assert.equal(first.get('s').id, 'early');
+  assert.equal(first.size, 1);
+});
+
+test('keeps input order for turns with equal sequence and start time', () => {
+  const turns = [turnPrompt('first', 's', 1), turnPrompt('second', 's', 1)];
+  assert.equal(firstTurnsBySession(turns).get('s').id, 'first');
 });
