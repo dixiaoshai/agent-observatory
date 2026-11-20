@@ -78,6 +78,14 @@ export class TraceService {
       this.archive.close();
       throw new ArchiveError('INVALID_CONFIG', 'serve requires collection.enabled or api.enabled');
     }
+    // Refuse to run a different projection against this archive before the
+    // collector or the read-only API can expose a mixed archive.
+    try {
+      this.archive.assertProjectionCurrent();
+    } catch (error) {
+      this.archive.close();
+      throw error;
+    }
     try {
       this.collector.start();
       if (this.server) await this.server.start();
@@ -92,6 +100,7 @@ export class TraceService {
       database: this.config.database,
       archive_id: this.archive.archiveId,
       capture_mode: this.archive.captureMode,
+      normalizer_version: this.archive.projectionVersion,
       collection: {
         enabled: this.config.collection.enabled,
         scan_interval_seconds: this.config.collection.enabled ? this.config.collection.scan_interval_seconds : null,

@@ -32,6 +32,10 @@ export interface ArchiveStatus {
   schema_version: 1;
   archive_id: string;
   capture_mode: View;
+  /** Projection that produced this archive; null when the archive predates versioning. */
+  normalizer_version: string | null;
+  /** Projection this build writes; a different value blocks writes until a rebuild. */
+  expected_normalizer_version: string;
   high_watermark: number;
   events: number;
   sessions: number;

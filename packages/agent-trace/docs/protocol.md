@@ -333,6 +333,36 @@ a secure erasure guarantee. A blob written before an archive transaction that
 later rolled back is an unreferenced orphan and can be removed by directory
 audit. New consumers see tombstones even when prior events were removed.
 
+## Projection version and archive upgrades
+
+Normalized payloads depend on the runtime adapters, not only on the source
+records. Every archive records the projection that produced its events in the
+`normalizer_version` metadata key; the value comes from `PROJECTION_VERSION` in
+`src/projection.ts` and MUST be bumped whenever an adapter changes the meaning or
+shape of an archived event. `status` reports both the archive's
+`normalizer_version` and this build's `expected_normalizer_version`, and
+`serve.started` logs the archive's value.
+
+Writes are refused when the two values differ. `importFile`, `delete-session`,
+`ingest`, `reingest` and `serve` fail with `PROJECTION_MISMATCH`; `serve` exits
+before collection or the read-only API can expose a mixed archive. Because
+unchanged source rows are deduplicated by `record_hash`, the refusal cannot be
+bypassed by reimporting the same files, and silently adding new-version events to
+old ones would leave consumers unable to tell which payloads are stale. CLI
+reads of an old archive remain available (`export`, `read`, `status`) for
+inspection and one-off exports, but `serve` does not start: a consumer polling a
+mixed archive over HTTP would silently treat stale projections as current.
+
+An upgrade is therefore an explicit rebuild: stop the writers, create a new
+archive from the configured sources (a new `archive_id`, full re-normalization
+with no deduplication against the old database), point the service at it, and
+recreate every consumer database. Consumer state is bound to `archive_id` and
+session projection identity; reusing an old consumer database against a rebuilt
+archive fails closed rather than silently mixing versions. `reingest` remains a
+same-projection repair that appends newly available source records (for example
+later `session.title` revisions); it cannot upgrade payloads and refuses a
+version mismatch instead of appearing to reconcile one.
+
 ## First acceptance criteria
 
 - Synthetic Codex, pi and dsh import, duplicate import and moved-copy import produce no doubles.

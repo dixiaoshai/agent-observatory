@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { chmodSync, mkdirSync, readFileSync, readdirSync, lstatSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { NORMALIZER_VERSION, normalize, parseRecords, sessionCwd as codexSessionCwd } from './codex.ts';
+import { normalize, parseRecords, sessionCwd as codexSessionCwd } from './codex.ts';
 import {
   contentPolicy, protectEvent, referencedBlobs, removeBlobs, type ContentOptions, type ContentPolicy,
 } from './content.ts';
@@ -13,6 +13,7 @@ import {
   isZstdSource, decodeZstdSource, normalize as normalizeDsh,
   parseRecords as parseDshRecords, sessionCwd as dshSessionCwd,
 } from './dsh.ts';
+import { PROJECTION_VERSION } from './projection.ts';
 import type { TitleLookup } from './titles.ts';
 import {
   ArchiveError, cursorOf, hash, identifier, timestamp, viewOf,
@@ -50,6 +51,8 @@ export class Archive {
   db: DatabaseSync;
   archiveId: string;
   captureMode: View;
+  /** Projection recorded when this archive was created; null for unversioned legacy databases. */
+  readonly projectionVersion: string | null;
   readonly content: ContentPolicy;
   constructor(filename: string, captureMode?: View, contentOptions: ContentOptions = {}) {
     this.content = contentPolicy(filename, contentOptions);
@@ -79,18 +82,42 @@ export class Archive {
       `);
       this.db.exec('BEGIN IMMEDIATE');
       try {
+        const isNew = this.db.prepare('SELECT 1 FROM metadata WHERE key=?').get('archive_id') === undefined;
         const insert = this.db.prepare('INSERT OR IGNORE INTO metadata VALUES (?,?)');
         insert.run('archive_id', randomUUID());
         insert.run('capture_mode', captureMode ?? 'metadata');
-        insert.run('normalizer_version', NORMALIZER_VERSION);
+        // Never stamp a version onto an existing archive: an unversioned
+        // database predates projection tracking and must be rebuilt, not relabelled.
+        if (isNew) insert.run('normalizer_version', PROJECTION_VERSION);
         this.archiveId = String(this.db.prepare('SELECT value FROM metadata WHERE key=?').get('archive_id')!.value);
         this.captureMode = viewOf(this.db.prepare('SELECT value FROM metadata WHERE key=?').get('capture_mode')!.value);
+        const projection = this.db.prepare('SELECT value FROM metadata WHERE key=?').get('normalizer_version');
+        this.projectionVersion = projection === undefined ? null : String(projection.value);
         if (captureMode && this.captureMode !== captureMode) throw new ArchiveError('CAPTURE_MODE', 'Archive capture mode is fixed; use a separate database to change it');
         this.db.exec('COMMIT');
       } catch (error) { this.db.exec('ROLLBACK'); throw error; }
     } catch (error) { this.db.close(); throw error; }
   }
   close(): void { this.db.close(); }
+
+  /**
+   * Refuse to write when this archive was produced by another projection.
+   *
+   * Older payloads are already stored with stable event identities, so silently
+   * adding new-version events would mix projections that no consumer can tell
+   * apart. Upgrading requires rebuilding from the sources into a new database
+   * and recreating the consumer databases; this guard makes that requirement an
+   * immediate, explicit failure instead of a stale warning noticed much later.
+   */
+  assertProjectionCurrent(): void {
+    if (this.projectionVersion === PROJECTION_VERSION) return;
+    const stored = this.projectionVersion === null ? 'an unversioned archive' : `projection ${this.projectionVersion}`;
+    throw new ArchiveError(
+      'PROJECTION_MISMATCH',
+      `This archive was written by ${stored}, but this build produces ${PROJECTION_VERSION}. ` +
+      'Rebuild the archive from its configured sources into a new database, point the service at it, and recreate the consumer databases; in-place upgrade is not supported.',
+    );
+  }
 
   importFile(
     filename: string,
@@ -99,6 +126,7 @@ export class Archive {
     titles?: TitleLookup,
     runtimeHint: RuntimeHint = 'auto',
   ): { imported: number; skipped: number; pending: boolean } {
+    this.assertProjectionCurrent();
     identifier(instanceId, 'instance ID');
     if (typeof project === 'string') identifier(project, 'project ID');
     const absolutePath = path.resolve(filename);
@@ -331,6 +359,7 @@ export class Archive {
     return row ? this.present(String(row.payload), Number(row.seq), view) : null;
   }
   deleteSession(runtime: string, instanceId: string, sessionId: string): { deleted: boolean; event_id?: string } {
+    this.assertProjectionCurrent();
     for (const [value, label] of [[runtime, 'runtime'], [instanceId, 'instance ID'], [sessionId, 'session ID']]) identifier(value, label!);
     const key = JSON.stringify([runtime, instanceId, sessionId]);
     this.db.exec('BEGIN IMMEDIATE');
@@ -358,6 +387,8 @@ export class Archive {
   status(): ArchiveStatus {
     return {
       schema_version: 1, archive_id: this.archiveId, capture_mode: this.captureMode,
+      normalizer_version: this.projectionVersion,
+      expected_normalizer_version: PROJECTION_VERSION,
       high_watermark: this.highWatermark(),
       events: Number(this.db.prepare('SELECT count(*) AS n FROM events').get()!.n),
       sessions: Number(this.db.prepare('SELECT count(*) AS n FROM sessions WHERE deleted=0').get()!.n),

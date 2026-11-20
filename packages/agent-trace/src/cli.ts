@@ -27,10 +27,14 @@ Commands (all accept --db PATH, default .agent-trace/trace.sqlite):
   help
 
 reingest re-reads every source file the configured collector already imported
-and reconciles the normalized events in place. Use it after an adapter upgrade
-that adds or changes normalized metadata (for example display titles); already
-identical events stay deduplicated, files the harness has since pruned count as missing instead of failing,
-and the collection lease is required, so the
+and appends events for source records that are new to the archive (for example
+later session.title revisions). It cannot upgrade an event payload that was
+produced by an older projection: unchanged source rows are deduplicated by their
+source hash, so an adapter semantic change requires rebuilding the archive from
+its configured sources into a new database and recreating the consumer databases.
+An archive written by another projection refuses writes with PROJECTION_MISMATCH;
+status reports normalizer_version. Files the harness has since pruned count as
+missing instead of failing, and the collection lease is required, so the
 collector must be stopped first. gc removes blob files in the configured content
 archive that no committed event cites (for example files left by an interrupted
 import); --dry-run only reports. Content capture saves selected original
@@ -114,6 +118,7 @@ async function main(): Promise<void> {
     if (!configPath) throw new ArchiveError('INVALID_INPUT', 'reingest requires --config: the archive, sources and project scopes come from the service configuration');
     const config = loadServiceConfig(configPath, { database: typeof v.db === 'string' ? v.db : undefined });
     const archive = new Archive(config.database, config.capture_mode, config.content);
+    archive.assertProjectionCurrent();
     const owner = `reingest-${randomUUID()}`;
     let leased = false;
     try {
@@ -168,6 +173,7 @@ async function main(): Promise<void> {
     try {
       switch (command) {
         case 'ingest': {
+          archive.assertProjectionCurrent();
           const files = sourceFiles(sources!);
           let imported = 0, skipped = 0;
           const pending: string[] = [], errors: Array<{ path: string; code: string }> = [];
@@ -184,7 +190,9 @@ async function main(): Promise<void> {
         }
         case 'export': result = archive.exportBatch(after, limit, view); break;
         case 'read': result = { event: archive.readEvent(eventId, view) }; break;
-        case 'delete-session': result = archive.deleteSession(runtime, instance, session); break;
+        case 'delete-session':
+          archive.assertProjectionCurrent();
+          result = archive.deleteSession(runtime, instance, session); break;
         case 'status': result = archive.status(); break;
       }
     } finally { archive.close(); }

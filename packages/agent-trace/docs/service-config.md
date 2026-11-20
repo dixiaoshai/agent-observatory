@@ -15,9 +15,9 @@ node src/cli.ts reingest --config PATH [--db OVERRIDE.sqlite]
 
 `config-check` 只读取并校验配置文件，不创建数据库、不扫描来源、不监听端口、不写访问日志。`--db` 与既有命令一致，显式覆盖配置里的数据库路径。
 
-`serve` 在前台运行到 SIGINT/SIGTERM：先校验配置并打开数据库，检查捕获模式；采集开启时获取单归档租约并周期性扫描，API 开启时只监听配置的回环地址。停止时不再调度新扫描、等待当前归档事务结束、关闭监听并释放租约。`collection.enabled` 与 `api.enabled` 都为 `false` 时拒绝启动。启动、扫描、错误和停止事件以 NDJSON 输出到 stdout，不包含 token、正文或原始对象。
+`serve` 在前台运行到 SIGINT/SIGTERM：先校验配置并打开数据库，检查捕获模式；若归档记录的 `normalizer_version` 与当前构建的 `PROJECTION_VERSION` 不一致，`serve` 在采集和 API 启动前以 `PROJECTION_MISMATCH` 退出（旧归档只能通过 CLI `export`/`read`/`status` 检视），避免把混合投影当成当前数据下发给消费方。之后采集开启时获取单归档租约并周期性扫描，API 开启时只监听配置的回环地址。停止时不再调度新扫描、等待当前归档事务结束、关闭监听并释放租约。`collection.enabled` 与 `api.enabled` 都为 `false` 时拒绝启动。启动、扫描、错误和停止事件以 NDJSON 输出到 stdout，不包含 token、正文或原始对象。
 
-`reingest` 用于适配器升级后的归档修复：它只重读 `collection_files` 中已记为 `imported` 的文件，按配置的项目范围重新规范化并原地对账；内容未变的行保持事件身份与去重，新增的元数据（例如 `session.title` 标题修订）会作为新事件追加并推进消费游标。来源侧已经清理的文件（例如 Codex 删除旧 rollout）计入 `missing`，不会让整个命令失败；只有读取错误、项目不匹配等才进入 `errors` 并以退出码 1 报告。它需要单归档采集租约，因此必须先停止 `serve`（或让租约过期），否则以 `COLLECTION_BUSY` 失败。已结束的会话不会因为源文件不变而被采集器自动重读，这是补上旧归档标题的受支持方式；未跟踪的文件仍用 `ingest`。
+`reingest` 用于同版本投影的归档补录：它只重读 `collection_files` 中已记为 `imported` 的文件，按配置的项目范围重新规范化；内容未变的行保持事件身份与去重，之后才出现在源文件里的记录（例如 `session.title` 标题修订）会作为新事件追加并推进消费游标。它**不会**重算已归档事件的负载：适配器语义变化要求提升 `PROJECTION_VERSION`，此时归档记录的是旧 `normalizer_version`，`ingest` / `reingest` / `serve` 都会以 `PROJECTION_MISMATCH` 拒绝写入，必须先按[协议](protocol.md#projection-version-and-archive-upgrades)重建新归档并重建消费方库；`status` 会同时报告归档版本和当前构建期望的版本。来源侧已经清理的文件（例如 Codex 删除旧 rollout）计入 `missing`，不会让整个命令失败；只有读取错误、项目不匹配等才进入 `errors` 并以退出码 1 报告。它需要单归档采集租约，因此必须先停止 `serve`（或让租约过期），否则以 `COLLECTION_BUSY` 失败。已结束的会话不会因为源文件不变而被采集器自动重读，这是补上旧归档标题的受支持方式；未跟踪的文件仍用 `ingest`。
 
 一份配置只对应一个归档数据库和一种 `capture_mode`。metadata 与 content 不能共用同一个数据库；需要同时提供两种视图时，分别用 `service.json` 和 `content.json` 启动两个 `serve`。它们可以使用不同端口、token 和项目范围，并可分别启停/重建；同一数据库仍只允许一个采集租约，不要用同一份配置启动两个进程。
 
