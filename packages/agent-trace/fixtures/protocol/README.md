@@ -1,94 +1,52 @@
-# Protocol v1 conformance fixtures
+# 协议 v1 一致性 fixtures
 
-Status: draft, not yet wired into any consumer's CI. Owner: Agent Trace.
-Protocol reference: [`docs/protocol.md`](../../docs/protocol.md), transport and
-consumer behavior: [`docs/local-api.md`](../../docs/local-api.md),
-[`docs/consumer-follow.md`](../../docs/consumer-follow.md).
+状态：草案，尚未接入任何消费方的 CI。维护者：Agent Trace。协议参考：[`docs/protocol.md`](../../docs/protocol.md)；传输与消费方行为见 [`docs/local-api.md`](../../docs/local-api.md) 与 [`docs/consumer-follow.md`](../../docs/consumer-follow.md)。
 
-These fixtures describe the **page contract** shared by every archive consumer
-(Agent Stats, Agent Knowledge, Agent Journal). They are tiny and synthetic: no
-real session content, paths or credentials. They exist so each consumer can test
-its *own* validator against the *same* accept/reject corpus without importing
-another consumer's code.
+这些 fixtures 描述所有归档消费方（Agent Stats、Agent Knowledge、Agent Journal）共享的**页面契约**。它们很小且完全合成：不含真实会话内容、路径或凭据。它们的存在是为了让每个消费方用**同一组**接受 / 拒绝语料测试**自己的**校验器，而无需导入另一个消费方的代码。
 
-## Layout
+## 目录结构
 
 ```text
 valid/
-  content-page-1.json          # one small session: started, user, tool, usage, final
-  content-deletion-page.json   # tombstone for that session; apply after cursor 6
-  content-ref-page.json        # externalized content_ref body (do not read the path)
-  metadata-empty-page.json     # empty metadata tail; metadata consumers only
-invalid/                       # 16 pages, each with exactly one contract violation
-manifest.json                  # expected outcome and rationale per fixture
-generate.mjs                   # source of truth; run after editing
+  content-page-1.json          # 一个很小的会话：started、user、tool、usage、final
+  content-deletion-page.json   # 该会话的墓碑；在游标 6 之后应用
+  content-ref-page.json        # 外置 content_ref 正文（不要读取其中的路径）
+  metadata-empty-page.json     # 空的 metadata 尾部；只面向 metadata 消费方
+invalid/                       # 16 个页面，每个恰好包含一处契约违规
+manifest.json                  # 每个 fixture 的预期结果与理由
+generate.mjs                   # 唯一事实来源；修改后重新运行
 ```
 
-## How consumers should use them
+## 消费方应如何使用
 
-1. Load `manifest.json`.
-2. For every `valid` fixture: feed it to your page validator with fresh state and
-   expect acceptance. For `content-page-1.json` followed by
-   `content-deletion-page.json`, expect the cursor to move `6 → 7` and the
-   session evidence to be removed, with a replayed old page not resurrecting it.
-3. For every `invalid` fixture: expect a **permanent** rejection, no cursor
-   advance and no partial writes. `expected_code` maps the semantic failure to
-   the codes named in `consumer-follow.md`; translate to your own code if your
-   consumer uses different names (the Knowledge manual importer reports
-   `INVALID_ARCHIVE` for all of them).
-4. Do not import the fixtures into production storage or copy them into a
-   consumer's own test data without keeping the manifest outcome.
+1. 加载 `manifest.json`。
+2. 对每个 `valid` fixture：用全新状态喂给你的页面校验器，预期接受。对 `content-page-1.json` 之后接 `content-deletion-page.json`，预期游标从 `6` 前进到 `7`，会话证据被移除，且重放的旧页不会让它复活。
+3. 对每个 `invalid` fixture：预期**永久**拒绝，游标不推进且不发生部分写入。`expected_code` 把语义失败映射到 `consumer-follow.md` 中的错误码；如果你的消费方使用不同名称，可自行翻译（Knowledge 的手动导入器对所有情况都报 `INVALID_ARCHIVE`）。
+4. 不要把 fixtures 导入生产存储，也不要在保留 manifest 结果的前提下把它们复制进消费方自己的测试数据。
 
-The two transports share the same contract: a CLI `export` file and an HTTP
-`/v1/events` page have the same envelope, event identity and cursor semantics.
+两种传输共享同一契约：CLI `export` 文件与 HTTP `/v1/events` 页具有相同的信封、事件身份和游标语义。
 
-## Cases that are state-dependent, not standalone fixtures
+## 依赖状态而非独立 fixture 的情况
 
-- `ARCHIVE_CHANGED`: feed a page after binding a different `archive_id`.
-- `VIEW_UNAVAILABLE`: `/v1/status` reports `archive.capture_mode = "metadata"`.
-- `PAGE_TOO_LARGE`: server-side 413; reduce `limit` and retry the same cursor.
-- `FOLLOW_LOCKED` / lease takeover: consumer state, not page content.
+- `ARCHIVE_CHANGED`：在绑定不同 `archive_id` 后喂入页面。
+- `VIEW_UNAVAILABLE`：`/v1/status` 报告 `archive.capture_mode = "metadata"`。
+- `PAGE_TOO_LARGE`：服务端 413；减小 `limit` 并用同一游标重试。
+- `FOLLOW_LOCKED` / 租约接管：属于消费方状态，不是页面内容。
 
-## Identity and field rules encoded here
+## 此处编码的身份与字段规则
 
-- `session_key = JSON.stringify([runtime, instance_id, session_id])` for every
-  event.
-- Codex `event_id = sha256(JSON.stringify([runtime, instance_id, session_id, source.line]))`;
-  add `source.series` when present (not used in these fixtures).
-- Deletion `event_id = sha256(JSON.stringify([runtime, instance_id, session_id, "deleted"]))`,
-  with `source`, `body`, `raw` null and `data` empty.
-- `archive_seq` strictly increases inside a page, never exceeds `next_cursor`,
-  and the page always starts at the consumer's committed cursor.
-- Usage token counts are nonnegative integers; absent fields are unknown, not zero.
-- `content_ref` is `{path: absolute, bytes, sha256, media_type: "text/plain"}`.
-- Metadata view pages carry `body = raw = null`.
+- 所有事件的 `session_key = JSON.stringify([runtime, instance_id, session_id])`。
+- Codex `event_id = sha256(JSON.stringify([runtime, instance_id, session_id, source.line]))`；存在 `source.series` 时加入（这些 fixtures 未使用）。
+- 删除事件 `event_id = sha256(JSON.stringify([runtime, instance_id, session_id, "deleted"]))`，`source`、`body`、`raw` 为 null，`data` 为空。
+- 页面内 `archive_seq` 严格递增，绝不超过 `next_cursor`，且页面总从消费方已提交游标开始。
+- 用量 token 数为非负整数；缺失字段表示未知，不是零。
+- `content_ref` 为 `{path: 绝对路径, bytes, sha256, media_type: "text/plain"}`。
+- metadata 视图页面的 `body = raw = null`。
 
-## Regenerate
+## 重新生成
 
 ```sh
 node generate.mjs
 ```
 
-The generator computes all identities itself and fails if a valid page violates
-the identity rules above.
-
-## Validation record (2026-11-15)
-
-Checked against the local Agent Knowledge build (`dist/interfaces/cli.js`,
-57 tests passing) with a temporary database and `allowed_project_ids: ["fixture"]`:
-
-- `valid/content-page-1.json` → accepted, cursor 6, imported 6.
-- `archive-search hello` → 3 hits; `archive-read` → the expected event.
-- `valid/content-deletion-page.json` → accepted, cursor 7, imported 0.
-- After deletion: search returns `[]`; reading the old event returns `NOT_FOUND`.
-- `valid/content-ref-page.json` → accepted; reading returns the event with the
-  `content_ref` unchanged (the blob path is not read).
-- All 16 `invalid/*.json` → rejected with `INVALID_ARCHIVE` and the cursor did not
-  advance (messages included "Invalid event ID", "Invalid session key",
-  "Invalid content reference", "Archive cursor gap", "Invalid deletion marker",
-  "Unexpected metadata field", "Invalid usage", and the strict envelope errors).
-- `valid/metadata-empty-page.json` is deliberately not importable by the
-  content-only Knowledge importer; it targets metadata consumers.
-
-This is fixture-level validation, not a replacement for Trace's ingest tests or
-for a real-host acceptance run.
+生成器自行计算所有身份，并在有效页违反上述身份规则时失败。

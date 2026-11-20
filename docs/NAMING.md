@@ -13,4 +13,4 @@
 
 新环境变量使用 AGENT_模块名_用途；JSON 与数据库字段沿用 snake_case，TypeScript 使用 camelCase，Python 使用 snake_case。event_id、archive_id、session_key 等领域字段不是品牌，不机械更名。
 
-用户数据路径与配置兼容逻辑沿用模块原行为。新仓库不自动移动原数据库、不迁移 source binding、不修改全局安装与 macOS 服务。公共包名尚未确认可用，发布时可能需要组织 scope，不应仅凭本地 manifest 假定公共 registry 已有本项目。
+用户数据路径与配置兼容逻辑沿用各模块既有行为。工具不会自动移动数据库、迁移 source binding、修改全局安装或 macOS 服务。公共包名尚未确认可用，发布时可能需要组织 scope，不应仅凭本地 manifest 假定公共 registry 已有本项目。

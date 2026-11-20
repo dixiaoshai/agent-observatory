@@ -1,18 +1,30 @@
-# 当前项目文档
+# Agent Stats 文档索引
 
-本目录记录当前 Codex 版本的使用方法、实现边界、前端开发与实际验收结果。
+本目录描述 Agent Stats 的当前用法、架构边界与输入契约。上层入口见[项目入口](../README.md)；仓库级架构、开发、安全与待办见根文档。
 
-同步：Stats 自己的 `follow --config` 主动拉取 Trace metadata，进度和重试留在 Stats；Trace 不向本项目推送。看板用 `serve --archive-only` 只读已接收数据，启动与刷新都不访问 Codex 源日志。见[消费方 follow 约定](../../agent-trace/docs/consumer-follow.md)和[工作区 TODO](../../../docs/ROADMAP.md)。Knowledge 侧 worker 已存在。
+## 同步与数据来源
+
+Stats 通过自己的 `follow --config` 主动拉取 Agent Trace 的本机 metadata API，进度、重试与租约都留在 Stats 本地；Trace 不向本项目推送，也不管理消费游标。看板用 `serve --archive-only` 只读已接收的统计库，启动与页面刷新都不访问 Codex 源日志。自定义 JSON / Python provider 不需要 Trace。相关约定见[消费方 follow 约定](../../agent-trace/docs/consumer-follow.md)。
+
+## 文档
 
 | 文档 | 内容 |
 | --- | --- |
-| [运行说明](RUNNING.md) | 启动、采集、安装、清理、HTTP 接口及 macOS 登录启动 |
-| [前端开发](FRONTEND.md) | React + TypeScript 模块、开发命令与构建方式 |
-| [Codex 接入能力](CODEX-CAPABILITIES.md) | 已核实字段、统计口径、支持范围与缺口 |
-| [验收记录](VALIDATION.md) | 已执行检查、结果及尚未覆盖的场景 |
+| [运行说明](RUNNING.md) | 启动、命令、Trace follow、macOS 登录启动、页面口径、HTTP 接口、隐私与当前限制 |
+| [前端开发](FRONTEND.md) | React + TypeScript 模块、页面、开发命令与构建方式 |
+| [Codex 接入能力](CODEX-CAPABILITIES.md) | 字段依据、能力声明、统计口径与降级 |
+| [数据源契约](SOURCES.md) | 自定义 JSON v1、观测用量 / 费用 / 覆盖、旧归档兼容、Python provider API |
 
-当前版本的合成数据预览：[总览](dashboard-preview.jpg) · [轮次详情](react-turn-detail.jpg)。
+配套示例文件：
 
-原仓库 history 历史资料未纳入本副本；以根目录当前架构、接入与验证文档为准。
+- [agent-stats.follow.example.json](../agent-stats.follow.example.json)：`follow` 配置样例。
+- [custom-source.example.json](custom-source.example.json)：自定义来源 JSON v1 样例，与随包资源一致。
 
-以上文档纳入仓库版本管理。
+合成数据预览：[总览](dashboard-preview.jpg) · [轮次详情](react-turn-detail.jpg)。
+
+## 根文档
+
+- [架构与依赖边界](../../../docs/ARCHITECTURE.md)
+- [开发指南](../../../docs/DEVELOPMENT.md)
+- [安装器安全与服务隔离](../../../docs/SAFETY.md)
+- [当前执行待办](../../../TODO.md)

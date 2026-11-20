@@ -1,11 +1,11 @@
 # 本机只读事件 API
 
-状态：P0 固定接口契约，P1 已实现服务端（`serve --config`）、扫描调度、租约与心跳。当前手动 `export` 批次继续有效且语义不变。更新日期：2026-11-14。
+`serve` 在配置启用 API 时提供回环 HTTP 接口，供消费方 `follow` worker 或自定义脚本拉取事件页与运行状态。CLI `export` 批次继续有效，且与 API 使用同一批次语义。
 
 启动方式：
 
 ```sh
-node src/cli.ts serve --config path/to/service.json
+npm run cli -- serve --config path/to/service.json
 ```
 
 `serve` 在前台运行到 SIGINT/SIGTERM。`collection.enabled=false` 时只提供已有归档的 API；`api.enabled=false` 时只做采集。两者都关闭会拒绝启动。启动、扫描、采集错误和停止事件以 NDJSON 输出到 stdout；不含 token、正文或原始事件。
@@ -16,10 +16,10 @@ node src/cli.ts serve --config path/to/service.json
 
 - 只监听配置中的回环地址：`127.0.0.1`、`::1` 或 `localhost`，端口默认 `8766`。拒绝非回环 bind。
 - 不因绑定回环就允许匿名访问。每个请求都必须带 `Authorization: Bearer <token>`；token 摘要和允许视图在配置文件 `api.clients` 中声明。
-- Stats 客户端只授权 `metadata`，Knowledge 客户端只授权 `content`；Agent Journal 同样只需要 `content`，并应使用独立客户端与 token，不能复用其他消费方的凭据。`/v1/status` 对任何已认证客户端可读，且不包含正文或原始对象。
+- Stats 客户端只授权 `metadata`；Knowledge 与 Journal 客户端只授权 `content`，并各自使用独立客户端与 token，不能复用其他消费方的凭据。`/v1/status` 对任何已认证客户端可读，且不包含正文或原始对象。
 - `Host` 必须是回环 host 加配置端口（`127.0.0.1:8766`、`localhost:8766` 或 `[::1]:8766`）。缺失或非回环 `Host` 返回 `INVALID_HOST`，用于降低 DNS rebinding 风险。
 - `Origin` 允许缺省（curl、CLI、worker）；若出现，只能是同一端口的回环 `http://` 源。`Origin: null` 或其它站点返回 `INVALID_ORIGIN`，避免浏览器跨站读取归档。
-- 访问日志不得记录 token、请求正文、事件正文或原始对象。当前实现不写逐请求访问日志；启动/扫描/停止事件只含身份、路径、计数、错误代码与时间。Trace 不写消费进度，也不需要消费方确认。
+- 访问日志不得记录 token、请求正文、事件正文或原始对象。当前实现不写逐请求访问日志；启动 / 扫描 / 停止事件只含身份、路径、计数、错误代码与时间。Trace 不写消费进度，也不需要消费方确认。
 
 ## `GET /v1/events`
 
@@ -60,7 +60,7 @@ Accept: application/json
 - `GET` 幂等，不推进服务端或消费方进度。相同范围可重试，没有“确认收货”副作用。
 - `has_more=true` 时消费方立即用 `next_cursor` 续取；追平后按自身空闲间隔轮询。
 - 空页可因删除标记或已有事件被删而跨过序号；`archive_seq` 允许空洞。
-- 单页最多 1000 事件，序列化后上限 32 MiB。若超限，请求以 413 `PAGE_TOO_LARGE` 失败且不返回半页；消费方应减小 `page_size`/`limit` 后重试同一游标。
+- 单页最多 1000 事件，序列化后上限 32 MiB。若超限，请求以 413 `PAGE_TOO_LARGE` 失败且不返回半页；消费方应减小 `page_size` / `limit` 后重试同一游标。
 - 归档内所有项目共用一条序列。客户端必须被授权读取页内全部项目；Knowledge 遇到未授权项目整页拒绝。当前没有按项目过滤的流；窄范围使用独立归档。
 - 游标超出归档历史或归档身份变化时返回错误，不返回空页伪装“已追平”。消费方不得自动把游标归零。
 
@@ -86,11 +86,11 @@ Accept: application/json
   "collection": {
     "enabled": true,
     "state": "idle",
-    "started_at": "2026-11-14T00:00:00.000Z",
-    "heartbeat_at": "2026-11-14T00:01:00.000Z",
+    "started_at": "2026-01-01T00:00:00.000Z",
+    "heartbeat_at": "2026-01-01T00:01:00.000Z",
     "scan_interval_seconds": 30,
-    "last_scan_started_at": "2026-11-14T00:00:30.000Z",
-    "last_scan_finished_at": "2026-11-14T00:00:31.000Z",
+    "last_scan_started_at": "2026-01-01T00:00:30.000Z",
+    "last_scan_finished_at": "2026-01-01T00:00:31.000Z",
     "last_scan": {
       "files": 12,
       "imported": 3,
@@ -105,7 +105,7 @@ Accept: application/json
         "instance_id": "workstation-a",
         "root": "/selected/codex/sessions",
         "project_ids": ["project-a"],
-        "last_scan_at": "2026-11-14T00:00:31.000Z",
+        "last_scan_at": "2026-01-01T00:00:31.000Z",
         "last_error": null
       }
     ]
@@ -117,22 +117,22 @@ Accept: application/json
 
 | 字段 | 含义 |
 | --- | --- |
-| `protocol` | 固定协议版本与页大小/字节上限；不随配置静默变化 |
+| `protocol` | 固定协议版本与页大小 / 字节上限；不随配置静默变化 |
 | `archive.archive_id` | 归档持久身份；消费方必须与游标分开保存并校验 |
 | `archive.capture_mode` | 建库时固定的捕获模式，不代表 content 视图一定有正文 |
 | `archive.high_watermark` | 已提交的最高归档序号。不是待消费事件数：删除产生空洞，各消费方游标独立 |
 | `collection.enabled` | 配置是否要求采集；API-only 服务可为 `false` |
 | `collection.state` | `disabled` / `starting` / `idle` / `scanning` / `degraded` / `stopped` |
 | `started_at` | 本次服务进程启动时间；静态信息与本次心跳分开 |
-| `heartbeat_at` | 采集/服务最近存活时间；过旧表示进程可能停滞 |
+| `heartbeat_at` | 采集 / 服务最近存活时间；过旧表示进程可能停滞 |
 | `scan_interval_seconds` | 当前配置的扫描间隔；API-only 时为 `null` |
 | `last_scan*` | 最近一次扫描的起止时间与计数 |
-| `last_scan.unmatched_projects` | 因 cwd 不匹配或歧义跳过的会话/文件数；未知项目不会被猜测归属 |
+| `last_scan.unmatched_projects` | 因 cwd 不匹配或歧义跳过的会话 / 文件数；未知项目不会被猜测归属 |
 | `last_scan.pending` | 因尾部半行等待下次处理的数量 |
 | `last_error` / `sources[].last_error` | 最近错误代码、消息和时间；单来源失败不阻止其它来源 |
 | `sources[]` | 非秘密的来源身份、根路径、项目 ID 与最近扫描健康状态 |
 
-状态不报告“Stats/Knowledge 已消费到哪里”，Trace 不保存目标列表、投递队列或 ack 状态。离线消费方是否落后只能由消费方自己的游标判断。
+状态不报告“Stats / Knowledge / Journal 已消费到哪里”，Trace 不保存目标列表、投递队列或 ack 状态。离线消费方是否落后只能由消费方自己的游标判断。
 
 ## 错误格式
 
@@ -144,7 +144,7 @@ Accept: application/json
 
 | HTTP | `code` | 场景 |
 | --- | --- | --- |
-| 400 | `INVALID_INPUT` | 未知/重复/空参数、`limit` 越界、非法 `view`、status 带参数 |
+| 400 | `INVALID_INPUT` | 未知 / 重复 / 空参数、`limit` 越界、非法 `view`、status 带参数 |
 | 400 | `INVALID_CURSOR` | `after` 非规范非负安全整数，或超出归档历史 |
 | 401 | `UNAUTHORIZED` | 缺少、格式错误或未知 bearer token |
 | 403 | `INVALID_HOST` | `Host` 缺失或不是配置端口的回环 host |
@@ -154,23 +154,20 @@ Accept: application/json
 | 405 | `METHOD_NOT_ALLOWED` | 非 GET 请求 |
 | 413 | `PAGE_TOO_LARGE` | 序列化页超过 32 MiB |
 | 414 | `QUERY_TOO_LARGE` | 查询串超过 4096 字符 |
-| 500 | `INTERNAL` | 服务端/归档内部错误；不泄露事件内容 |
+| 500 | `INTERNAL` | 服务端 / 归档内部错误；不泄露事件内容 |
 
-`errorResponse`、`httpStatusFor`、`parseEventsQuery`、`authorizeRequest`、`authorizeView` 和 `buildApiStatus` 已在 [src/api.ts](../src/api.ts) 实现并有回归测试；P1 的 HTTP 服务复用这些函数，没有另定义一套宽松解析。路由、监听和批次生成在 [src/server.ts](../src/server.ts)，进程编排在 [src/service.ts](../src/service.ts)。
+`errorResponse`、`httpStatusFor`、`parseEventsQuery`、`authorizeRequest`、`authorizeView` 和 `buildApiStatus` 已在 [src/api.ts](../src/api.ts) 实现并有回归测试；HTTP 服务复用这些函数，没有另定义一套宽松解析。路由、监听和批次生成在 [src/server.ts](../src/server.ts)，进程编排在 [src/service.ts](../src/service.ts)。
 
 ## 与手动批次的关系
 
-CLI `export --view ... --output FILE` 继续保留，文件仍为同一 v1 批次，权限 `0600`，拒绝覆盖。HTTP 不取代手动导入；消费方可在自己的 `follow` worker 中使用 HTTP 分页，同时保留 `import-archive`/`archive-import` 用于离线或显式重建。切换传输方式不改变 `archive_id`、事件身份、视图或游标含义。
+CLI `export --view ... --output FILE` 继续保留，文件仍为同一 v1 批次，权限 `0600`，拒绝覆盖。HTTP 不取代手动导入；消费方可在自己的 `follow` worker 中使用 HTTP 分页，同时保留 `import-archive` / `archive-import` 用于离线或显式重建。切换传输方式不改变 `archive_id`、事件身份、视图或游标含义。
 
-## 当前实现范围
+## 当前范围与已知限制
 
-已实现：`serve --config PATH [--db PATH]`、采集扫描调度、单归档租约/心跳、`GET /v1/events`、`GET /v1/status`、Host/Origin/bearer 校验、查询边界、32 MiB 页上限、SIGINT/SIGTERM 停止与监听/数据库清理。
+已实现：`serve --config PATH [--db PATH]`、采集扫描调度、单归档租约 / 心跳、`GET /v1/events`、`GET /v1/status`、Host / Origin / bearer 校验、查询边界、32 MiB 页上限、SIGINT / SIGTERM 停止与监听 / 数据库清理。
 
 尚未实现或未验证：
 
-- Stats/Knowledge 的自动 `follow` worker（P2）。
-- 断网、超时、双机并发和大规模真实历史负载；当前端到端测试使用回环地址、临时库和合成日志。
 - 按项目过滤的独立事件流；当前授权仍要求消费方能读取整页所有项目。
-- 浏览器前端、UI 集成和非回环访问。
-
-这些未完成项不得在文档或部署中描述为已启用能力；见 [TODO](../../../docs/ROADMAP.md) P2/P3。
+- 浏览器前端、UI 集成、非回环访问和多用户认证。
+- 大规模真实历史负载与长时间运行；端到端测试使用回环地址、临时库和合成日志。

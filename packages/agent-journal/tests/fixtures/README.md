@@ -1,5 +1,5 @@
-# Synthetic Trace protocol fixtures
+# 合成 Trace 协议 fixtures
 
-`protocol/` contains a byte-for-byte snapshot of the synthetic JSON protocol fixtures and manifest from the monorepo's `agent-trace/fixtures/protocol/`. They contain no real user sessions. This copy makes the complete Journal test suite runnable without the Trace package. Missing fixtures are a test failure, not a skipped success.
+`protocol/` 保存 monorepo 中 `agent-trace/fixtures/protocol/` 的合成 JSON 协议样例与 manifest 的逐字节副本，不包含任何真实用户会话。保留该副本后，无需 Trace 包也能运行完整的 Journal 测试套件。缺少 fixtures 视为测试失败，不能当作跳过后的成功。
 
-When the Trace protocol fixtures change, compare/update this copy deliberately and run the Journal suite and cross-module protocol tests. The original generator belongs to Trace and is not needed to run Journal tests.
+Trace 协议 fixtures 变更时，应有意识地比较并更新这份副本，然后运行 Journal 套件和跨模块协议测试。原始生成器属于 Trace，运行 Journal 测试不需要它。

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Scan tracked files (or a pre-Git source tree), including historical archives.
+"""Scan tracked files (or a pre-Git source tree), including archived text.
 
 Credential findings fail. Personal home paths warn, or fail with --strict-privacy.
 No matched content is printed. Exceptions are exact synthetic values and paths.
@@ -26,7 +26,7 @@ SENSITIVE_NAME = re.compile(r"(^|/)(?:\.env(?:\..+)?|\.npmrc|\.pypirc|id_(?:rsa|
 GENERATED = {'.git', 'node_modules', '.cache', 'dist', 'build', 'artifacts', '.venv', '__pycache__', 'coverage', '.agent-trace', '.agent-stats', '.agent-journal', '.knowrelay'}
 MAX_BYTES = 2 * 1024 * 1024
 BINARY_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.woff', '.woff2', '.ttf', '.pdf', '.zip', '.gz', '.zstd'}
-# Only exact documented synthetic values may be exempted, never an entire archive.
+# Only exact documented synthetic values may be exempted, never a whole directory.
 SYNTHETIC = {
     # Intentional rejected URL in config tests and documentation placeholder.
     ('packages/agent-journal/tests/config.test.ts', 'url credentials'): {'http://' + 'user:pass@127.0.0.1'},

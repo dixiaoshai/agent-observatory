@@ -1,6 +1,6 @@
 # 安装器安全与服务隔离
 
-**不要直接照抄历史文档中的安装 / 卸载命令。** 本副本没有接管原项目服务；新的源码安装器必须显式传入 `--apply` 才允许变更服务。没有该参数时，安装和卸载均在任何服务操作或写入前拒绝；`--dry-run` 只展示计划，不运行 launchctl。Trace 不允许同时传 `--apply` 和 `--dry-run`；Stats / Journal 同时传入时 dry-run 优先，仍不执行。
+源码安装器必须显式传入 `--apply` 才允许变更服务。没有该参数时，安装和卸载均在任何服务操作或写入前拒绝；`--dry-run` 只展示计划，不运行 launchctl。Trace 不允许同时传 `--apply` 和 `--dry-run`；Stats / Journal 同时传入时 dry-run 优先，仍不执行。
 
 ## 隔离默认值
 
@@ -13,7 +13,7 @@
 | Stats 可选 follow | local.agent-observatory.agent-stats-follow | 同 Stats 状态目录 |
 | Journal 日报 | local.agent-observatory.agent-journal | `~/.local/share/agent-observatory/agent-journal/` |
 
-这些名称不同于原项目的 local.agent-stats、local.agent-trace-content、local.agent-knowledge-follow、local.agent-journal 等。默认 plist 使用新服务名，不停止、卸载或覆盖原标签。Stats 默认仅安装隔离看板（18765，archive-only + no-content），不会自动安装 Trace；显式选择 `--with-trace` 时先核对所有所需配置、token 与服务资源，再执行。
+这些名称与常见的 local.agent-stats、local.agent-trace-content、local.agent-knowledge-follow、local.agent-journal 等标签不同。默认 plist 使用隔离服务名，不停止、卸载或覆盖已有标签。Stats 默认仅安装隔离看板（18765，archive-only + no-content），不会自动安装 Trace；显式选择 `--with-trace` 时先核对所有所需配置、token 与服务资源，再执行。
 
 ## 先看计划，不做部署
 
@@ -38,6 +38,6 @@ node packages/agent-journal/scripts/install-macos-service.ts --dry-run --config 
 3. 对真实日志范围、模型费用、服务启动和任何共用数据取得明确授权。
 4. 多服务安装不是全局事务。运行时 bootstrap 失败可能留下已安装的**新隔离服务**，需按错误逐项处理，不能顺手卸载原服务。
 
-## 本次验证边界
+## 当前验证边界
 
-测试使用纯计划函数、临时目录、子进程 / 文件写入 / 网络 mock 验证拒绝路径和 dry-run，未实际调用 launchctl、未安装或卸载服务。实际 macOS 部署仍需单独授权与验证。执行前还会逐级检查受管状态、日志、wrapper、plist 与默认配置 / secret 路径，拒绝符号链接或异常文件类型重定向；这属于尽力预检，检查后本地并发替换路径仍存在竞态，不能当作对抗恶意本地进程的完整沙箱。本次原项目与历史文件完整性核对见[验证记录](VALIDATION.md)。
+安装器安全只通过纯计划函数、临时目录、子进程 / 文件写入 / 网络 mock 验证拒绝路径和 dry-run，不实际调用 launchctl、不安装或卸载服务。实际 macOS 部署仍需单独授权与验证。执行前还会逐级检查受管状态、日志、wrapper、plist 与默认配置 / secret 路径，拒绝符号链接或异常文件类型重定向；这属于尽力预检，检查后本地并发替换路径仍存在竞态，不能当作对抗恶意本地进程的完整沙箱。

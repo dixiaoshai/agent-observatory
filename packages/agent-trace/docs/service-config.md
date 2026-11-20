@@ -1,29 +1,30 @@
 # 服务配置
 
-状态：P0 固定配置格式与校验，P1 已实现 `config-check`、前台 `serve`、扫描调度、单归档租约/心跳和 HTTP 监听。更新日期：2026-11-14。
-
-目标设计见[常驻采集与主动拉取](continuous-collection.md)，本机读取接口见[本机 API](local-api.md)，消费方约定见[消费方 follow 约定](consumer-follow.md)。
+常驻 `serve`、`config-check`、`reingest` 与 `gc` 共用一份严格 JSON 服务配置。本机读取接口见[本机只读 API](local-api.md)，消费方约定见[消费方 follow 约定](consumer-follow.md)，采集与进程边界见[架构说明](architecture.md)。
 
 ## 命令与副作用
 
 ```sh
-node src/cli.ts config-check --config agent-trace.service.example.json
-node src/cli.ts config-check --config PATH --db OVERRIDE.sqlite
-node src/cli.ts serve --config PATH [--db OVERRIDE.sqlite]
-node src/cli.ts reingest --config PATH [--db OVERRIDE.sqlite]
+npm run cli -- config-check --config agent-trace.service.example.json
+npm run cli -- config-check --config PATH --db OVERRIDE.sqlite
+npm run cli -- serve --config PATH [--db OVERRIDE.sqlite]
+npm run cli -- reingest --config PATH [--db OVERRIDE.sqlite]
+npm run cli -- gc --config PATH [--db OVERRIDE.sqlite] [--dry-run]
 ```
 
 `config-check` 只读取并校验配置文件，不创建数据库、不扫描来源、不监听端口、不写访问日志。`--db` 与既有命令一致，显式覆盖配置里的数据库路径。
 
-`serve` 在前台运行到 SIGINT/SIGTERM：先校验配置并打开数据库，检查捕获模式；若归档记录的 `normalizer_version` 与当前构建的 `PROJECTION_VERSION` 不一致，`serve` 在采集和 API 启动前以 `PROJECTION_MISMATCH` 退出（旧归档只能通过 CLI `export`/`read`/`status` 检视），避免把混合投影当成当前数据下发给消费方。之后采集开启时获取单归档租约并周期性扫描，API 开启时只监听配置的回环地址。停止时不再调度新扫描、等待当前归档事务结束、关闭监听并释放租约。`collection.enabled` 与 `api.enabled` 都为 `false` 时拒绝启动。启动、扫描、错误和停止事件以 NDJSON 输出到 stdout，不包含 token、正文或原始对象。
+`serve` 在前台运行到 SIGINT/SIGTERM：先校验配置并打开数据库，检查捕获模式；若归档记录的 `normalizer_version` 与当前构建的 `PROJECTION_VERSION` 不一致，`serve` 在采集和 API 启动前以 `PROJECTION_MISMATCH` 退出（旧归档只能通过 CLI `export` / `read` / `status` 检视），避免把混合投影当成当前数据下发给消费方。之后采集开启时获取单归档租约并周期性扫描，API 开启时只监听配置的回环地址。停止时不再调度新扫描、等待当前归档事务结束、关闭监听并释放租约。`collection.enabled` 与 `api.enabled` 都为 `false` 时拒绝启动。启动、扫描、错误和停止事件以 NDJSON 输出到 stdout，不包含 token、正文或原始对象。
 
-`reingest` 用于同版本投影的归档补录：它只重读 `collection_files` 中已记为 `imported` 的文件，按配置的项目范围重新规范化；内容未变的行保持事件身份与去重，之后才出现在源文件里的记录（例如 `session.title` 标题修订）会作为新事件追加并推进消费游标。它**不会**重算已归档事件的负载：适配器语义变化要求提升 `PROJECTION_VERSION`，此时归档记录的是旧 `normalizer_version`，`ingest` / `reingest` / `serve` 都会以 `PROJECTION_MISMATCH` 拒绝写入，必须先按[协议](protocol.md#projection-version-and-archive-upgrades)重建新归档并重建消费方库；`status` 会同时报告归档版本和当前构建期望的版本。来源侧已经清理的文件（例如 Codex 删除旧 rollout）计入 `missing`，不会让整个命令失败；只有读取错误、项目不匹配等才进入 `errors` 并以退出码 1 报告。它需要单归档采集租约，因此必须先停止 `serve`（或让租约过期），否则以 `COLLECTION_BUSY` 失败。已结束的会话不会因为源文件不变而被采集器自动重读，这是补上旧归档标题的受支持方式；未跟踪的文件仍用 `ingest`。
+`reingest` 用于同版本投影的归档补录：它只重读 `collection_files` 中已记为 `imported` 的文件，按配置的项目范围重新规范化；内容未变的行保持事件身份与去重，之后才出现在源文件里的记录（例如 `session.title` 标题修订）会作为新事件追加并推进消费游标。它**不会**重算已归档事件的负载：适配器语义变化要求提升 `PROJECTION_VERSION`，此时归档记录的是旧 `normalizer_version`，`ingest` / `reingest` / `serve` 都会以 `PROJECTION_MISMATCH` 拒绝写入，必须先按[协议](protocol.md#投影版本与归档升级)重建新归档并重建消费方库；`status` 会同时报告归档版本和当前构建期望的版本。来源侧已经清理的文件（例如 Codex 删除旧 rollout）计入 `missing`，不会让整个命令失败；只有读取错误、项目不匹配等才进入 `errors` 并以退出码 1 报告。它需要单归档采集租约，因此必须先停止 `serve`（或让租约过期），否则以 `COLLECTION_BUSY` 失败。已结束的会话不会因为源文件不变而被采集器自动重读，这是补上旧归档标题的受支持方式；未跟踪的文件仍用 `ingest`。
 
-一份配置只对应一个归档数据库和一种 `capture_mode`。metadata 与 content 不能共用同一个数据库；需要同时提供两种视图时，分别用 `service.json` 和 `content.json` 启动两个 `serve`。它们可以使用不同端口、token 和项目范围，并可分别启停/重建；同一数据库仍只允许一个采集租约，不要用同一份配置启动两个进程。
+`gc` 只对 content 归档有意义：删除配置 blob 目录中形如 `<event_id>-<sha256>.txt` 且未被任何已提交事件引用的文件。`--dry-run` 只报告；metadata 库调用会报 `CAPTURE_MODE`。详见[正文归档](content-capture.md)。
+
+一份配置只对应一个归档数据库和一种 `capture_mode`。metadata 与 content 不能共用同一个数据库；需要同时提供两种视图时，分别用 `service.json` 和 `content.json` 启动两个 `serve`。它们可以使用不同端口、token 和项目范围，并可分别启停 / 重建；同一数据库仍只允许一个采集租约，不要用同一份配置启动两个进程。
 
 成功时输出规范化后的配置 JSON（相对路径已按配置文件目录解析）；`token_sha256` 不会回显。失败时退出码为 1，错误代码为 `INVALID_CONFIG`，消息给出字段路径，例如 `config.collection.sources[0].root: ...`。未知字段一律拒绝，避免拼写错误静默扩大采集范围或访问权限。
 
-示例文件：[agent-trace.service.example.json](../agent-trace.service.example.json)（metadata）与 [agent-trace.content.example.json](../agent-trace.content.example.json)（content 试点，独立库与 blob 目录）。示例默认关闭采集与 API；启用前必须替换占位路径和 token 哈希。`config-check` 通过不代表来源目录已存在或数据库捕获模式匹配，这些在 `serve` 启动时检查。
+示例文件：[agent-trace.service.example.json](../agent-trace.service.example.json)（metadata）与 [agent-trace.content.example.json](../agent-trace.content.example.json)（content，独立库与 blob 目录）。示例默认关闭采集与 API；启用前必须替换占位路径和 token 哈希。`config-check` 通过不代表来源目录已存在或数据库捕获模式匹配，这些在 `serve` 启动时检查。
 
 ## 完整格式
 
@@ -64,9 +65,8 @@ node src/cli.ts reingest --config PATH [--db OVERRIDE.sqlite]
 }
 ```
 
-接入 Agent Journal 时，需要新增第三个 content 客户端（例如
-`{ "id": "agent-journal", "views": ["content"], "token_sha256": "<64-hex>" }`）并单独签发 token；
-该客户端当前未启用，不要复用 Stats/Knowledge 的 token。Journal 使用独立游标与日缓冲，Trace 侧不保存其消费进度。
+接入 Agent Journal 时，为它新增独立的 content 客户端（例如
+`{ "id": "agent-journal", "views": ["content"], "token_sha256": "<64-hex>" }`）并单独签发 token；不要复用 Stats / Knowledge 的 token。Journal 使用独立游标与日缓冲，Trace 侧不保存其消费进度。
 
 ### 顶层字段
 
@@ -103,9 +103,9 @@ node src/cli.ts reingest --config PATH [--db OVERRIDE.sqlite]
 | --- | --- | --- |
 | `instance_id` | 是 | 稳定来源实例 ID，写入事件身份；同一安装使用同一值 |
 | `runtime` | 否 | `auto`（默认）、`codex`、`pi` 或 `dsh`。`auto` 按首条记录识别；`deepseek-harness` 是 `dsh` 的配置别名并按 `dsh` 保存。显式值与实际格式不一致时该文件报 `RUNTIME_MISMATCH` |
-| `root` | 是 | 文件或目录，递归接收 `.jsonl`；相对路径相对配置文件；不跟随符号链接；单文件上限 128 MiB，来源文件数上限 10000 |
+| `root` | 是 | 文件或目录，递归接收 `.jsonl`、`.jsonl.zstd`、`.jsonl.zst`；相对路径相对配置文件；不跟随符号链接；单文件上限 128 MiB，dsh 解码后上限 256 MiB，来源文件数上限 10000 |
 | `projects` | 是 | 至少一个项目范围；同一来源内 `project_id` 不得重复。仅当设置 `unmatched_project_id` 时可为空数组 |
-| `unmatched_project_id` | 否 | 兜底项目 ID。设置后，cwd 未命中任何 `cwd_allowlist`（或缺失/非绝对/非法路径）的会话归入该 ID，该来源进入“全量采集”；必须与同一来源已声明的 `project_id` 不同 |
+| `unmatched_project_id` | 否 | 兜底项目 ID。设置后，cwd 未命中任何 `cwd_allowlist`（或缺失 / 非绝对 / 非法路径）的会话归入该 ID，该来源进入“全量采集”；必须与同一来源已声明的 `project_id` 不同 |
 
 项目范围对象：
 
@@ -128,7 +128,7 @@ node src/cli.ts reingest --config PATH [--db OVERRIDE.sqlite]
 | 字段 | 必填 | 规则 |
 | --- | --- | --- |
 | `id` | 是 | 稳定客户端 ID，用于状态与排错；全部客户端内唯一 |
-| `views` | 是 | `metadata` / `content` 的非空子集，不得重复；Stats 只配 `metadata`，Knowledge 只配 `content` |
+| `views` | 是 | `metadata` / `content` 的非空子集，不得重复；Stats 只配 `metadata`，Knowledge 与 Journal 只配 `content` |
 | `token_sha256` | 是 | bearer token 的 64 位 SHA-256 十六进制摘要；不得与其他客户端重复 |
 
 生成 token 与摘要（明文只交给对应消费方，Trace 配置只保存摘要）：
@@ -137,7 +137,7 @@ node src/cli.ts reingest --config PATH [--db OVERRIDE.sqlite]
 # 例如 Stats 侧保存 AGENT_TRACE_STATS_TOKEN
 TOKEN="$(openssl rand -hex 32)"
 printf %s "$TOKEN" | shasum -a 256   # macOS；Linux 可用 sha256sum
-printf %s "$TOKEN"                    # 写入消费方自己的环境/密钥存储
+printf %s "$TOKEN"                    # 写入消费方自己的环境 / 密钥存储
 unset TOKEN
 ```
 
@@ -148,10 +148,10 @@ unset TOKEN
 - `database`、来源 `root` 和 `cwd_allowlist` 的相对路径都相对**配置文件所在目录**，不是进程当前目录。因此从任意目录启动都得到同一结果。
 - 不支持 `~` 展开；配置 `~/...` 会被拒绝，使用绝对路径或相对路径。
 - `--db` 覆盖保持既有 CLI 语义：相对路径相对当前工作目录，而不是配置文件。
-- 省略 `database` 时沿用既有默认规则：配置目录下 `.agent-trace/trace.sqlite` 优先；仅当它不存在且旧 `.agent-archive/archive.sqlite` 存在时使用旧库。显式 `database` 或 `--db` 始终优先。
+- 省略 `database` 时沿用默认规则：配置目录下 `.agent-trace/trace.sqlite` 优先；仅当它不存在且旧 `.agent-archive/archive.sqlite` 存在时使用旧库。显式 `database` 或 `--db` 始终优先。
 - 显式路径不存在时会新建空归档；不会自动回退到旧库，也不会移动、复制或删除存量数据。切换数据库前必须规划消费方游标与重建，不能把同一会话静默交给另一个归档。
 - `capture_mode` 只在建库时生效。对已有库请求不同模式会在打开时报 `CAPTURE_MODE`；不要另建库来“切换”同一会话的捕获模式。
-- content 归档必须使用新的独立数据库与独立 blob 目录，并作为独立 `archive_id` 配置消费方游标。正式 metadata 库、现有消费方游标不因正文试点改变。
+- content 归档必须使用新的独立数据库与独立 blob 目录，并作为独立 `archive_id` 配置消费方游标。现有 metadata 库与消费方游标不因新增 content 归档改变。
 - `content.blob_directory` 默认跟随数据库目录；若它落在代码仓库或同步盘内，请显式改到私密目录。删除 content 数据库时不会自动删除 blob 目录或导出副本。
 
 ## 项目匹配规则
@@ -183,7 +183,7 @@ unset TOKEN
 
 这样命中 `agent-trace` 的会话仍记为该 ID，其余全部归入 `unscoped`。从已有归档升级时，启用兜底会改变该来源的扫描范围指纹，之前计为 `unmatched` 的文件会在下一轮扫描自动补采；是否回补更早的基线文件仍由 `backfill` 决定（`all` 会导入首次扫描时只登记基线的文件）。
 
-`projectForCwd` 已实现上述规则并有回归测试；P1 扫描器直接复用。被跳过的文件不写归档，未匹配/歧义文件在扫描状态中计数；扫描状态只作为优化，已归档文件的检查点在该文件归档事务提交后才写入。
+`projectForCwd` 实现上述规则并有回归测试；扫描器直接复用。被跳过的文件不写归档，未匹配 / 歧义文件在扫描状态中计数；扫描状态只作为优化，已归档文件的检查点在该文件归档事务提交后才写入。
 
 ## 默认值汇总
 
@@ -202,16 +202,20 @@ unset TOKEN
 
 ## 采集状态与运行约束
 
-`serve` 在归档数据库内维护三张非事件表：`collection_lease`（单实例租约）、`collection_sources`（基线/最近扫描/错误）和 `collection_files`（来源文件身份、大小、mtime、结果）。它们不改变事件身份、`archive_id`、批次协议或消费方游标。
+`serve` 在归档数据库内维护三张非事件表：`collection_lease`（单实例租约）、`collection_sources`（基线 / 最近扫描 / 错误）和 `collection_files`（来源文件身份、大小、mtime、结果）。它们不改变事件身份、`archive_id`、批次协议或消费方游标。
 
 - 同一归档同时只允许一个有效采集租约；第二个 `serve` 报 `COLLECTION_LOCKED`。租约默认 5 分钟，进程每 15 秒续租；崩溃或强杀后可在过期后接管。
-- 文件状态按文件身份（设备/ino）、大小、mtime/ctime 比较。变化才整文件重读，复用既有事件身份去重；导入成功后的检查点在该文件归档事务提交后写入，基线/未匹配项目是带版本与范围指纹的无导入决策；没有字节偏移 tail。
+- 文件状态按文件身份（设备 / ino）、大小、mtime / ctime 比较。变化才整文件重读，复用既有事件身份去重；导入成功后的检查点在该文件归档事务提交后写入，基线 / 未匹配项目是带版本与范围指纹的无导入决策；没有字节偏移 tail。
 - `backfill=none` 的首次成功扫描只写基线，不导入当时已有文件；之后新建或变化的文件才整文件导入。
-- 半行等待、完整坏行回滚、文件移动/复制去重、来源重写冲突和删除防复活均沿用归档事务语义。单来源失败只记该来源错误，继续处理其他来源。
-- `GET` 只读，不推进采集或消费进度。状态接口区分进程/心跳、最近扫描、来源错误与归档高水位。
+- 半行等待、完整坏行回滚、文件移动 / 复制去重、来源重写冲突和删除防复活均沿用归档事务语义。单来源失败只记该来源错误，继续处理其他来源。
+- `GET` 只读，不推进采集或消费进度。状态接口区分进程 / 心跳、最近扫描、来源错误与归档高水位。
 
-## 当前范围与下一步
+## 当前范围与已知限制
 
-已实现：严格配置解析、路径解析与兼容规则、项目/cwd 匹配、token 摘要与视图能力校验、请求与状态契约、`serve --config`、来源扫描调度、运行租约/心跳、SQLite/HTTP 生命周期、`GET /v1/events`、`GET /v1/status`，以及 content 模式的脱敏、外置大输出与 `content` 配置。
+已实现：严格配置解析、路径解析与兼容规则、项目 / cwd 匹配、token 摘要与视图能力校验、请求与状态契约、`serve --config`、来源扫描调度、运行租约 / 心跳、SQLite / HTTP 生命周期、`GET /v1/events`、`GET /v1/status`、`reingest`、`gc`，以及 content 模式的脱敏、外置大输出与 `content` 配置。
 
-未实现：消费方 `follow` 自动拉取（P2）、按项目过滤的事件流、非回环监听、浏览器 UI、长期运行的真实 Codex 宿主验收与网络故障/超时矩阵。不要因为服务可启动就假定自动消费链已经可用。
+尚未实现或未验证：
+
+- 按项目过滤的事件流；当前授权仍要求消费方能读取整页所有项目。
+- 非回环监听、多用户认证、浏览器 UI。
+- 长期运行的真实宿主验收、网络故障 / 超时矩阵与跨机部署。

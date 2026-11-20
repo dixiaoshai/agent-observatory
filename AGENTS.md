@@ -15,7 +15,7 @@ Agent Observatory 是四个可独立安装的工具组成的 monorepo，不是�
 | [Knowledge](packages/agent-knowledge/) | 文档索引、检索、来源核验与 MCP；Node + TypeScript |
 | [根工具脚本](scripts/) | 打包、独立安装验证、敏感数据扫描和工具回归 |
 
-优先参考[根 README](README.md)、[架构](docs/ARCHITECTURE.md)、[数据源契约](docs/DATA-SOURCES.md)、[开发指南](docs/DEVELOPMENT.md)和[安全说明](docs/SAFETY.md)。当前任务见[TODO](TODO.md)，后续方向见[路线图](docs/ROADMAP.md)。子包文档用于功能细节；涉及 monorepo 路径、安装与部署时以根文档为准，不把历史部署声明或测试数量当作当前验证结果。
+优先参考[根 README](README.md)、[架构](docs/ARCHITECTURE.md)、[开发指南](docs/DEVELOPMENT.md)、[安全说明](docs/SAFETY.md)和[命名规则](docs/NAMING.md)。当前任务见[TODO](TODO.md)，后续方向见[路线图](docs/ROADMAP.md)。子包文档用于功能细节；涉及 monorepo 路径、安装与部署时以根文档为准。文档只描述当前架构与用法，不把历史验证数字、旧部署声明或迁移记录写入文档；需要当前结果时实际运行检查。
 
 ## 架构与数据约束
 
@@ -82,8 +82,6 @@ npm run build --prefix packages/agent-stats/frontend
 | `npm run pack:modules` | 只生成本地 Node tgz 和 Python wheel，写入发行物目录 |
 | `npm run check:privacy` | 公开前严格路径隐私检查 |
 
-`verify:originals` 仅适用于原目录仍在的迁移现场，不作为普通 clone 的必跑检查。如扫描报告[历史原文归档](docs/history/)中的隐私路径，应报告并交由维护者审查，不要为让扫描变绿而改写原文或扩大豁免。新增未暂存文件需扫描时运行 `python3 scripts/check-sensitive.py --all-files`，默认扫描只覆盖 Git 已跟踪文件。
-
 ## 代码与产物约定
 
 - 遵循所在文件的风格，避免无关格式化。Node 包使用 ESM 与严格 TypeScript；保持既有导入扩展名和构建转换方式，不为源码直跑而破坏发行后的 JavaScript / 类型声明。
@@ -92,13 +90,13 @@ npm run build --prefix packages/agent-stats/frontend
 - 不手改依赖、缓存与生成目录：`node_modules/`、`dist/`、`build/`、`.cache/`、`artifacts/`、`__pycache__/`、`*.egg-info/`。
 - [Stats 静态资源](packages/agent-stats/agent_stats/static/)是**已跟踪、随 Python 包分发**的生成产物。修改[前端源码](packages/agent-stats/frontend/src/)后通过前端 build 更新，并检查生成 diff；不要直接修改哈希 JS / CSS。
 - 正常运行和包内示例不能回读仓库兄弟目录。修改公共 API、CLI、配置或输入契约时，同步相关文档、示例、测试及发行文件白名单。
-- [历史归档](docs/history/)与[迁移基线](docs/migration-baseline.json)是来源记录，不因日常功能改动重写；当前计划写入[TODO](TODO.md)或[路线图](docs/ROADMAP.md)。
+- 文档改动保持中文、结构清晰、无重复段落；删除过时内容时同步修正全仓链接与示例，不保留指向已删除文件的引用。
 
 ## 安全边界与交付
 
 - 默认只使用新建临时库和合成输入。未经明确授权，不读取真实宿主会话、个人数据库、凭证或日报，不调用付费模型，不修改 MCP / 宿主配置或全局安装。
 - 不自行执行服务安装 / 卸载、`launchctl` 或安装器 `--apply`。先读[安全说明](docs/SAFETY.md)，需要预览时只用对应安装器的 `--dry-run`；真实部署必须另获授权并核对服务名、端口、配置和所有数据路径。
-- 不触碰相邻原项目，不自动迁移数据库、修改来源绑定或复用原配置。隔离服务名并不保证数据路径隔离。
-- 不将密钥、个人绝对路径、真实日志、数据库或运行状态加入 fixtures、文档或提交。敏感扫描适用于历史文件，不能用整目录豁免掩盖问题。
+- 不触碰相邻项目，不自动迁移数据库、修改来源绑定或复用他人配置。隔离服务名并不保证数据路径隔离。
+- 不将密钥、个人绝对路径、真实日志、数据库或运行状态加入 fixtures、文档或提交。默认敏感扫描覆盖 Git 已跟踪文件；新增未暂存文件需扫描时运行 `python3 scripts/check-sensitive.py --all-files`。
 - 未经明确要求，不发布 npm / PyPI 包、不绑定远端、不提交或推送；不擅自添加许可证或承诺公共包名可用。
 - 完成后简述变更与实际执行的验证；明确列出未执行、失败或受环境限制的检查，不把旧验证记录当作本次通过。

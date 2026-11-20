@@ -1,156 +1,145 @@
-# Agent Stats · Codex / pi / dsh
+# Agent Stats · 本机 agent 用量看板
 
-> 本文是随代码保留的历史模块文档；其中真实部署与运行声明不构成本新项目的验证。工具集入口见[根文档](../../README.md)。当前项目验证见[验证记录](../../docs/VALIDATION.md)。独立源码副本中的数据源说明见[来源说明](docs/SOURCES.md)。
+## 模块定位
 
-面向 Codex、pi 与 DeepSeek Harness（`dsh`）的本地用量分析工具：**本地日志 / agent-trace 元数据 → SQLite → 总览看板 → 会话 / 轮次及工具证据下钻**。
+Agent Stats 是 Agent Observatory 中的用量统计模块，作为独立 Python 包发行。它把 Codex、pi、dsh 的本地日志（或自定义标准化会话数据）解析为 SQLite 统计投影，并通过本机看板展示用量、费用估算与覆盖信息；任务详情可按需只读 Agent Trace 的正文归档。
 
-pi 通过 agent-trace 的 pi adapter 接入：会话、轮次、工具和 Token 来自 pi 的 session JSONL，费用优先使用 pi 在请求时记录的 `usage.cost.total`（provider 实报或模型费率），不再按当前价格表重算；没有记录成本的来源（如 Codex 与 dsh）继续按 API 标准价估算，看板会区分两种口径。dsh 通过 agent-trace 的 dsh adapter 接入：Trace 解码 `session.vN.jsonl.zstd` 后提供相同的 metadata 事件，dsh 日志只记录请求级 TokenUsage，不记录请求成本。dsh 会话名按日志里的 `session/title` 修订显示：先出现的是 prompt 回退名，模型生成名称到达后替换为最新修订；Trace 采集到标题之后才会覆盖首次采集时的快照，旧归档可用 Trace 的 `reingest --config` 重新规范化。dsh 子代理会话按 header 的 `origin`/`parentSession` 归属父会话，在「各轮明细」的会话视图中嵌套在父会话下；dsh 日志没有父轮次身份，子代理轮次保持「所属父轮次未知」而不按时间猜测。
-
-所有数据都留在本机：服务只监听 `127.0.0.1`，统计库只保存元数据。任务详情可按需只读 Agent Trace 已脱敏的正文归档，正文不写入统计库。缺失的信息保持「未知」，不做近似估算。
+- 独立运行：要求 Python 3.9+，后端只用标准库，前端构建产物随包分发，生产运行不需要 Node。
+- 输入可选：原生 Codex 日志、自定义 JSON / Python provider、可选 Agent Trace metadata（`follow` / `import-archive`）。
+- 只读本机，只保存统计元数据；缺失信息保持未知，不补零。
+- 服务只监听 `127.0.0.1`，不提供远程访问。
 
 ## 特性
 
-- **本地优先**：只读 `CODEX_HOME` 下的 `sessions` / `archived_sessions`，不联网、不上传。
-- **覆盖度诚实**：Token、费用、模型请求数等字段按来源实际可得性展示，缺失不记为零。
-- **零后端依赖**：后端仅用 Python 标准库（3.9+），自带构建好的前端产物，装完即可运行。
-- **前端可开发**：React + TypeScript + Vite，按页面 / 组件 / 数据访问拆分。
+- **本地优先**：原生模式只读 `CODEX_HOME`（默认 `~/.codex`）下的 `sessions` / `archived_sessions`，不联网、不上传。
+- **覆盖度诚实**：Token、费用、请求数等指标按来源实际可获得性展示；父子、分叉、缓存等口径无法确认时，只展示带标注的观测小计。
+- **来源独立**：自定义 JSON / Python provider 不需要 Agent Trace；只有显式配置正文归档时才只读 Trace content 库。
+- **零后端依赖**：后端仅用 Python 标准库，自带构建好的 React 前端，装完即可运行。
+- **前端可开发**：React + TypeScript + Vite，按页面、组件与数据访问拆分，可独立构建。
 
 ## 快速开始
 
-```bash
+在 `packages/agent-stats/` 下运行：
+
+```sh
 python3 -m agent_stats serve
 ```
 
-访问 <http://127.0.0.1:8765/>。
+打开 <http://127.0.0.1:8765/>，`Ctrl+C` 停止。默认数据库为 `~/.local/share/agent-stats/stats.sqlite3`。来源、端口、实例命名空间与归档只读模式的完整选项见[运行说明](docs/RUNNING.md)。
 
-本副本尚未安装任何服务。`follow` + `serve --archive-only` 可让看板只读已接收数据。源码安装器使用隔离服务名与状态路径、默认不执行更改；必须先审阅 [运行说明](docs/RUNNING.md) 中的风险及 `--dry-run` 计划，再决定是否显式使用 `--apply`。
+纯合成演示（不读取真实日志）：
 
-### 在任务详情查看执行正文
+```sh
+python3 -m agent_stats demo --output .agent-stats/demo
+python3 -m agent_stats --db .agent-stats/demo.sqlite3 serve --source .agent-stats/demo
+```
 
-打开会话或轮次详情，点击“查看执行正文”，按时间线查看用户请求、Agent 回复、最终回答、推理摘要和工具输入输出。工具记录和摘要默认折叠；通过“加载更多”续读。“来源证据”保留事件 ID、源文件及行号；大型外置正文需点击读取，服务端校验文件范围、大小及 SHA-256。
+自定义来源（不依赖 Trace 与 Codex）：
 
-正文直接来自 Agent Trace 的独立 content 归档，不依赖 Agent Knowledge，也不读取原始 Codex/pi 日志。默认发现 `~/.local/share/agent-trace/content.json`；可通过 `AGENT_STATS_CONTENT_CONFIG` 或 `serve --content-config PATH` 指定 Trace content 配置，使用 `serve --no-content` 关闭。没有配置、会话未采集或归档不可用时显示明确提示，已有统计仍可使用。
+```sh
+mkdir -p .agent-stats
+python3 -m agent_stats example --output .agent-stats/custom.json
+python3 -m agent_stats --db .agent-stats/custom.sqlite3 import-json --input .agent-stats/custom.json
+python3 -m agent_stats --db .agent-stats/custom.sqlite3 summary
+python3 -m agent_stats --db .agent-stats/custom.sqlite3 serve --archive-only --no-content
+```
+
+输入格式见[数据源契约](docs/SOURCES.md)。
+
+安装为命令：
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install .
+.venv/bin/agent-stats serve
+```
+
+## 任务详情正文下钻（可选）
+
+打开会话或轮次详情，点击“查看执行正文”，按时间线查看用户请求、Agent 回复、最终回答、推理摘要和工具输入输出；工具记录和摘要默认折叠，通过“加载更多”续读，“来源证据”保留事件 ID、源文件及行号。大型外置正文需按需读取，服务端校验目录、文件类型、大小与 SHA-256。
+
+正文直接来自 Agent Trace 的独立 content 归档，不依赖 Agent Knowledge，也不读取原始 Codex / pi 日志。默认发现 `~/.local/share/agent-trace/content.json`；可通过 `AGENT_STATS_CONTENT_CONFIG` 或 `serve --content-config PATH` 指定 Trace content 配置，使用 `serve --no-content` 关闭：
 
 ```sh
 python3 -m agent_stats serve --archive-only --content-config /absolute/path/to/agent-trace/content.json
 ```
 
-会话详情展示整个会话的正文，不随统计日期/模型筛选裁剪；轮次详情只展示对应轮次。推理摘要是源日志中的模型摘要，不能当作完整内部思考；工具返回也不等于执行成功。正文按普通文本展示，不执行其中的 HTML、脚本或命令。正文范围只由 Trace content 配置的项目集合决定，与 `follow` 的 `allowed_project_ids` 消费范围相互独立。
+- 正文只作为 HTTP 响应返回，不写入统计库；未配置、未采集或归档不可用时显示明确提示，已有统计仍可使用。
+- 正文范围由 Trace content 配置的项目集合决定，与 `follow` 的 `allowed_project_ids` 消费范围相互独立。
+- 会话详情展示整个会话正文，不随统计日期 / 模型筛选裁剪；轮次详情只展示对应轮次。
+- 推理摘要是源日志中的模型摘要，不等于完整内部思考；工具返回不代表执行成功；正文按普通文本展示，不执行其中的 HTML、脚本或命令。
 
-默认数据库为 `~/.local/share/agent-stats/stats.sqlite3`；受限环境可加全局参数 `--db .agent-stats/stats.sqlite3`。
+## 可选：跟随 Trace 元数据归档
 
-先看纯合成演示（不读真实日志）：
-
-```bash
-python3 -m agent_stats demo --output .agent-stats/demo
-python3 -m agent_stats --db .agent-stats/demo.sqlite3 serve --source .agent-stats/demo
-```
-
-也可以安装为命令：
-
-```bash
-python3 -m pip install -e .
-agent-stats serve
-```
-
-## 可选：跟随元数据归档
-
-`follow` 可消费兼容的元数据事件 API（回环地址），按已提交游标增量拉取，统计投影与游标在同一事务内提交：
-
-```json
-{
-  "schema_version": 1,
-  "trace_url": "http://127.0.0.1:8766",
-  "token_env": "AGENT_TRACE_STATS_TOKEN",
-  "database": "./.agent-stats/stats.sqlite3",
-  "page_size": 500,
-  "idle_seconds": 15,
-  "request_timeout_seconds": 20,
-  "max_backoff_seconds": 300
-}
-```
+`follow` 可消费 Agent Trace 的本机 metadata 事件 API（仅回环地址），按自身已提交游标增量拉取，统计投影与游标在同一事务内提交；看板用 `serve --archive-only` 只读已接收数据。
 
 ```sh
-export AGENT_TRACE_STATS_TOKEN=...      # 明文 token 只从环境变量读取，不写入配置或日志
+export AGENT_TRACE_STATS_TOKEN=...      # 明文 token 只从环境变量读取
 python3 -m agent_stats config-check --config agent-stats.follow.example.json   # 只校验配置：不建库、不联网
 python3 -m agent_stats follow --config agent-stats.follow.example.json
 python3 -m agent_stats --db .agent-stats/stats.sqlite3 serve --archive-only
 ```
 
-可选字段 `allowed_project_ids`（字符串数组）把消费范围收窄到名单内的项目：
-
-- 省略该字段 = 消费全部项目（默认，保持既有行为）；写入后只消费名单内项目的事件。
-- 名单外事件在事务内跳过：不写统计投影，也不视为错误；游标照常前进，重放同一页仍幂等。
-- 项目 ID 精确匹配，数组会去重；空数组、空字符串、首尾带空白或非字符串的值都会拒绝启动。
-- 缩小范围不会清理已导入的历史数据，也不会让整个页面失败。
-- 任务详情的正文范围由 Trace content 配置的项目集合决定，与 follow 的消费范围相互独立。
-
-```json
-{
-  "schema_version": 1,
-  "trace_url": "http://127.0.0.1:8766",
-  "token_env": "AGENT_TRACE_STATS_TOKEN",
-  "database": "./.agent-stats/stats.sqlite3",
-  "allowed_project_ids": ["agent-stats"]
-}
-```
-
-stdout 逐行输出 `follow.started` / `follow.page` / `follow.idle` / `follow.error` / `follow.state` / `follow.stopped`（NDJSON，不含 token、正文或原始事件）。`Ctrl+C` / SIGTERM 优雅停止并释放租约，退出码 `0`；配置 / 启动 / 租约失败 `1`；启动后遇到永久错误 `2`。
-
-也可以离线导入归档批次：
-
-```sh
-python3 -m agent_stats --db .agent-stats/shared.sqlite3 import-archive --input /path/to/metadata-page.json
-python3 -m agent_stats --db .agent-stats/shared.sqlite3 summary
-```
+示例配置见 [agent-stats.follow.example.json](agent-stats.follow.example.json)。配置字段、可选 `allowed_project_ids` 范围、重试与退出码、租约行为和离线 `import-archive` 用法见[运行说明](docs/RUNNING.md)。
 
 ## 项目结构
 
-```
-agent_stats/          后端（采集、SQLite 投影、HTTP API、CLI）
-agent_stats/static/   前端构建产物（随包发布）
+```text
+agent_stats/          后端（来源解析、SQLite 投影、HTTP API、CLI、follow）
+agent_stats/static/   前端构建产物（随包分发）
 frontend/             React + TypeScript + Vite 源码与前端测试
-tests/                Python 单元 / 集成测试
-scripts/              辅助脚本（如 macOS LaunchAgent 安装）
+tests/                Python 单元 / 集成测试（合成输入与临时库）
+scripts/              macOS LaunchAgent 安装器、敏感信息扫描
+docs/                 本模块文档
 ```
 
 ## 开发与测试
 
 后端测试（无需第三方依赖）：
 
-```bash
-python3 -m unittest discover -s tests -p 'test_*.py'
+```sh
+python3 -m unittest discover -s tests -v
 ```
 
-前端（Node 22+）：
+前端（Node.js 22.12+，独立 npm 项目）：
 
-```bash
-cd frontend
-npm ci
-npm test          # node --test + 类型剥离
-npm run check     # tsc --noEmit
-npm run build     # 输出到 agent_stats/static
+```sh
+npm --prefix frontend ci
+npm test --prefix frontend
+npm run check --prefix frontend
+npm run build --prefix frontend
 ```
 
-CI 会在每个 Pull Request 上运行 Python 3.9 / 3.13、前端全套检查，以及敏感信息扫描，结果汇总为 `CI success`；`main` 分支要求该检查通过后才能合并。
+构建产物写入 `agent_stats/static/`，该目录是随仓库跟踪的生成结果；界面改动请在 `frontend/src/` 进行。开发细节见[前端开发](docs/FRONTEND.md)。提交前可运行敏感信息扫描：
 
-提交前可本地先跑一遍敏感信息扫描（token、私钥、URL 内嵌凭证、个人主目录路径、`.env` 之类文件），命中即失败：
-
-```bash
+```sh
 python3 scripts/check_sensitive.py
 ```
 
-## 参与贡献
+仓库级安装、检查与发行流程见[根开发指南](../../docs/DEVELOPMENT.md)。
 
-CI 流水线、`main` 分支保护、Dependabot 和敏感信息检查的详细说明见 [CONTRIBUTING.md](CONTRIBUTING.md)。所有改动请走 Pull Request，`CI success` 通过后才能合并。
+## 隐私与边界
 
-## 数据与隐私
+- 原生模式只在本机解析指定 JSONL 并持久化统计元数据：会话显示名、最多 80 字符的 Prompt 轮次摘要、Token / 工具计数与来源定位；不保存完整 prompt、思考、命令、工具参数和输出正文。
+- 数据库文件、摘要、项目路径与事件身份仍可能包含敏感信息，请按本机敏感数据管理。
+- `follow` 的 bearer token 只从环境变量读取，不写入配置或日志。
+- HTTP 服务只绑定 IPv4 回环地址，拒绝不匹配 Host 与跨来源请求；没有远程访问能力。
+- 正文下钻是显式的只读能力：不写统计库、不依赖 Knowledge、不打开源日志，可用 `serve --no-content` 关闭。
+- 本机日志格式与版本相关，不是稳定公开 API；未知指标保持未知，API 等价费用估算不等于实际账单。
+- macOS 安装器是源码开发工具：预览用 `--dry-run`（只展示计划，不做文件或服务修改），真实安装 / 卸载必须显式 `--apply` 并另行授权，无参数时会拒绝变更。运行前请读[安装器安全说明](../../docs/SAFETY.md)。
 
-- 默认只读取 `CODEX_HOME`（默认 `~/.codex`），只保存统计元数据。
-- 路径与事件身份仍可能属于敏感信息，数据库文件请自行妥善保管。
-- `follow` 的 token 只从环境变量读取，不写入配置或日志。
-- 服务仅绑定回环地址，不提供公网访问能力。
+## 文档索引
 
-## 许可
+| 文档 | 内容 |
+| --- | --- |
+| [文档索引](docs/README.md) | 本模块文档导航与合成预览 |
+| [运行说明](docs/RUNNING.md) | 启动、命令、follow、安装、页面口径、HTTP 接口、隐私与当前限制 |
+| [前端开发](docs/FRONTEND.md) | React 模块、开发命令与构建 |
+| [Codex 接入能力](docs/CODEX-CAPABILITIES.md) | 字段依据、能力声明与降级 |
+| [数据源契约](docs/SOURCES.md) | 自定义 JSON v1、观测用量 / 费用 / 覆盖、Python provider API |
+| [架构与依赖边界](../../docs/ARCHITECTURE.md) | 仓库级模块边界 |
+| [开发指南](../../docs/DEVELOPMENT.md) | 仓库级安装、检查与发行 |
+| [安全说明](../../docs/SAFETY.md) | 安装器隔离与风险 |
+| [当前执行待办](../../TODO.md) | 仓库当前工作项 |
 
-暂未附带开源许可证（默认保留所有权利）。如需复用请先联系作者。
+许可证：暂未附带开源许可证（默认保留所有权利）；对外发布前需要确认原始代码与素材的授权。

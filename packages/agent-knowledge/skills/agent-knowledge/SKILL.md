@@ -9,7 +9,7 @@ description: 使用 Agent Knowledge 检索项目文档、代码知识和既往�
 
 ## 确认能力和范围
 
-当前阶段实现知识读取 `search_context(query, project_id?, kind?: "knowledge", limit?)` 和 `read_record(record_id, project_id?)`，以及归档证据读取 `search_archive(query, project_id?, limit?)`、`read_archive_event(archive_id, event_id, project_id?)`。历史工具输出和 agent 声明是待核实证据，不自动成为确认知识。导入由本地 CLI 完成；当前没有记忆保存、运行时采集或反馈工具，不能报告这些能力已生效。
+当前实现知识读取 `search_context(query, project_id?, kind?: "knowledge", limit?)` 和 `read_record(record_id, project_id?)`，以及归档证据读取 `search_archive(query, project_id?, limit?)`、`read_archive_event(archive_id, event_id, project_id?)`。工具输出和 agent 声明是待核实证据，不自动成为确认知识。导入由本地 CLI 完成；当前没有记忆保存、运行时采集或反馈工具，不能报告这些能力已生效。
 
 - 确认当前项目与会话归属，使用已授权范围；查询条件只能缩小范围。
 - 从可用工具中找到 `search_context`、`read_record` 对应能力。保存和反馈分别需要 `record_memory`、`record_feedback`；不要猜测完整 MCP 工具前缀或参数。
