@@ -7,7 +7,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from agent_stats.archive import import_batch
+from agent_stats.archive import _rollout_result, import_batch
 from agent_stats.core import Store
 
 
@@ -25,6 +25,17 @@ def record(seq, kind, data=None, sid='synthetic', project='demo'):
 def page(start, end, events):
     return {'schema_version': 1, 'archive_id': 'archive-demo', 'view': 'metadata', 'after_cursor': start,
             'next_cursor': end, 'has_more': False, 'events': events}
+
+
+def auth_record(seq, started_seq=1, data=None, sid='synthetic'):
+    """Account-scope evidence sharing the session_meta line with session.started."""
+    event = record(seq, 'session.auth', data if data is not None else
+                   {'turn_id': None, 'root_turn_id': None, 'model': None, 'account_scoped': True}, sid)
+    event['source']['line'] = started_seq
+    native = json.dumps(['codex', 'local', sid, started_seq, 'session.auth'],
+                        ensure_ascii=False, separators=(',', ':'))
+    event['event_id'] = hashlib.sha256(native.encode('utf-8')).hexdigest()
+    return event
 
 
 class ArchiveTests(unittest.TestCase):
@@ -307,6 +318,161 @@ class ArchiveTests(unittest.TestCase):
             import_batch(self.store, page(0, 8, self.rows + [extra]))
         self.assertEqual(self.store.db.execute('SELECT count(*) FROM sessions').fetchone()[0], 0)
 
+
+    def _import_auto_review(self, occurred, with_auth=True, store=None):
+        store = store or self.store
+        rows = [record(1, 'session.started', {'cwd': '/demo', 'created_at': occurred})]
+        if with_auth:
+            rows.append(auth_record(2))
+        rows.extend([
+            record(3, 'turn.started', {'turn_id': 'review'}),
+            record(4, 'turn.context', {'turn_id': 'review', 'model': 'codex-auto-review'}),
+            record(5, 'usage.snapshot', {'turn_id': 'review',
+                                         'cumulative': {'input_tokens': 100, 'output_tokens': 20, 'total_tokens': 120},
+                                         'last_usage': {'input_tokens': 100, 'output_tokens': 20, 'total_tokens': 120}}),
+            record(6, 'turn.completed', {'turn_id': 'review'}),
+        ])
+        for row in rows:
+            row['occurred_at'] = occurred
+        import_batch(store, page(0, 6, rows))
+        return store
+
+    def test_session_auth_marks_account_scope_and_waives_auto_review_cost(self):
+        self._import_auto_review('2026-11-01T10:00:00Z')
+        result = self.store.query()
+        # session.auth is metadata only: it neither creates nor joins a turn.
+        self.assertEqual(result['summary']['turns'], 1)
+        session = result['sessions'][0]
+        turn = result['turns'][0]
+        self.assertEqual(turn['model'], 'codex-auto-review')
+        self.assertIs(turn['account_scoped'], True)
+        self.assertEqual(turn['estimated_cost'], 0)
+        self.assertEqual(turn['cost_basis'], 'free')
+        self.assertEqual(turn['cost_source'], 'free_waiver')
+        self.assertIsNone(turn['cost_breakdown'])
+        self.assertEqual(result['summary']['estimated_cost'], 0)
+        self.assertEqual(result['summary']['estimated_cost_known'], 0)
+        self.assertEqual(result['summary']['cost_basis'], 'free')
+        detail = self.store.detail(session['id'])
+        self.assertIs(detail['session']['account_scoped'], True)
+        self.assertIs(detail['turns'][0]['account_scoped'], True)
+
+    def test_session_auth_does_not_change_rollout_revision_rank(self):
+        start = record(1, 'session.started', {'cwd': '/demo', 'created_at': '2026-01-01T10:00:00Z'})
+        context = record(2, 'turn.context', {'turn_id': 'turn', 'model': 'demo'})
+        auth = auth_record(2)
+        auth['occurred_at'] = start['occurred_at']
+        # The additive evidence shares the session_meta source line; the rollout
+        # rank must still count source records, not normalized events.
+        with_auth = _rollout_result([start, auth, context])
+        without_auth = _rollout_result([start, context])
+        self.assertIsNotNone(with_auth)
+        self.assertEqual(with_auth[0], without_auth[0])
+
+    def test_session_auth_removal_clears_account_scope(self):
+        self._import_auto_review('2026-11-01T10:00:00Z')
+        session = self.store.query()['sessions'][0]
+        self.assertIs(self.store.detail(session['id'])['session']['account_scoped'], True)
+        removal = page(6, 7, [])
+        removal['removed_events'] = [{'archive_seq': 7, 'removed_seq': 2}]
+        import_batch(self.store, removal)
+        self.assertNotIn('account_scoped', self.store.detail(session['id'])['session'])
+        self.assertIsNone(self.store.query()['turns'][0]['estimated_cost'])
+
+    def test_session_auth_waiver_cutoff_and_absence_stay_unknown(self):
+        for label, occurred, with_auth in (('pre-cutoff', '2026-10-05T23:59:59Z', True),
+                                           ('no-auth', '2026-11-01T10:00:00Z', False)):
+            with self.subTest(label=label):
+                store = Store(self.root / (label + '.sqlite3'))
+                self.addCleanup(store.db.close)
+                self._import_auto_review(occurred, with_auth=with_auth, store=store)
+                turn = store.query()['turns'][0]
+                self.assertIsNone(turn['estimated_cost'])
+                self.assertIsNone(turn['cost_basis'])
+                self.assertIsNone(turn['cost_source'])
+                self.assertTrue(turn['estimated_cost_reason'])
+                if with_auth:
+                    self.assertIs(turn['account_scoped'], True)
+                else:
+                    # Absence stays unknown; it is never encoded as API-key or false.
+                    self.assertNotIn('account_scoped', turn)
+
+    def test_session_auth_identity_flag_and_runtime_are_validated(self):
+        started = record(1, 'session.started', {'cwd': '/demo', 'created_at': '2026-11-01T10:00:00Z'})
+        import_batch(self.store, page(0, 1, [started]))
+        # A shared source line still needs the trailing identity discriminator.
+        undiscriminated = record(2, 'session.auth', {'account_scoped': True})
+        undiscriminated['source']['line'] = 1
+        with self.assertRaises(ValueError):
+            import_batch(self.store, page(1, 2, [undiscriminated]))
+        # A false flag is not a valid "unknown" encoding.
+        with self.assertRaises(ValueError):
+            import_batch(self.store, page(1, 2, [auth_record(2, data={'account_scoped': False})]))
+        # The kind is Codex-only.
+        foreign = auth_record(2)
+        foreign['runtime'] = 'pi'
+        foreign['session_key'] = json.dumps(['pi', 'local', 'synthetic'], separators=(',', ':'))
+        with self.assertRaises(ValueError):
+            import_batch(self.store, page(1, 2, [started, foreign]))
+        self.assertEqual(self.store.db.execute('SELECT cursor FROM archive_cursors').fetchone()[0], 1)
+
+    def test_session_auth_identity_includes_folded_series(self):
+        started = record(1, 'session.started', {'cwd': '/demo', 'created_at': '2026-11-01T10:00:00Z'})
+        folded = record(2, 'session.auth', {'turn_id': None, 'root_turn_id': None, 'model': None,
+                                            'account_scoped': True})
+        folded['source'] = {'path': '/demo/folded.jsonl', 'line': 1,
+                            'record_hash': format(42, '064x'), 'series': 'folded-identity'}
+        native = json.dumps(['codex', 'local', 'synthetic', 'folded-identity', 1, 'session.auth'],
+                            ensure_ascii=False, separators=(',', ':'))
+        folded['event_id'] = hashlib.sha256(native.encode('utf-8')).hexdigest()
+        import_batch(self.store, page(0, 2, [started, folded]))
+        self.assertEqual(self.store.db.execute('SELECT cursor FROM archive_cursors').fetchone()[0], 2)
+        # The folded rollout has no session_meta of its own, so it proves no scope.
+        session = self.store.query()['sessions'][0]
+        self.assertNotIn('account_scoped', self.store.detail(session['id'])['session'])
+
+    def test_session_auth_is_taken_from_the_winning_rollout_only(self):
+        def rollout_event(seq, kind, data, series, occurred, line=None, sid='synthetic'):
+            row = record(seq, kind, data, sid)
+            row['occurred_at'] = occurred
+            row['source'] = {'path': '/demo/%s.jsonl' % series, 'line': line or seq,
+                             'record_hash': format(seq + 200, '064x'), 'series': series}
+            parts = ['codex', 'local', sid, series, row['source']['line']]
+            if kind == 'session.auth':
+                parts.append('session.auth')
+            native_id = json.dumps(parts, ensure_ascii=False, separators=(',', ':'))
+            row['event_id'] = hashlib.sha256(native_id.encode('utf-8')).hexdigest()
+            return row
+
+        older = [
+            rollout_event(1, 'session.started', {'cwd': '/demo', 'created_at': '2026-01-01T10:00:00Z'},
+                          'old', '2026-01-01T10:00:00Z'),
+            rollout_event(2, 'session.auth', {'turn_id': None, 'root_turn_id': None,
+                                              'model': None, 'account_scoped': True},
+                          'old', '2026-01-01T10:00:01Z', line=1),
+        ]
+        # The older, account-scoped rollout loses to the newer revision.
+        newer = [
+            rollout_event(3, 'session.started', {'cwd': '/demo', 'created_at': '2026-01-01T10:00:00Z'},
+                          'new', '2026-11-01T10:00:00Z'),
+            rollout_event(4, 'turn.started', {'turn_id': 'review'}, 'new', '2026-11-01T10:00:01Z'),
+            rollout_event(5, 'turn.context', {'turn_id': 'review', 'model': 'codex-auto-review'},
+                          'new', '2026-11-01T10:00:02Z'),
+            rollout_event(6, 'turn.completed', {'turn_id': 'review'}, 'new', '2026-11-01T10:00:03Z'),
+        ]
+        import_batch(self.store, page(0, 2, older))
+        import_batch(self.store, page(2, 7, newer))
+        session = self.store.query()['sessions'][0]
+        self.assertNotIn('account_scoped', self.store.detail(session['id'])['session'])
+        self.assertIsNone(self.store.query()['turns'][0]['estimated_cost'])
+
+        # Auth evidence arriving for the winning rollout applies to the session.
+        extra = rollout_event(8, 'session.auth', {'turn_id': None, 'root_turn_id': None,
+                                                  'model': None, 'account_scoped': True},
+                              'new', '2026-11-02T10:00:00Z', line=3)
+        import_batch(self.store, page(7, 9, [extra]))
+        self.assertIs(self.store.detail(session['id'])['session']['account_scoped'], True)
+        self.assertEqual(self.store.query()['turns'][0]['estimated_cost'], 0)
 
     def test_folded_source_series_is_part_of_the_identifier(self):
         start = record(1, 'session.started', {'cwd': '/demo', 'created_at': '2026-01-01T10:00:00Z'})

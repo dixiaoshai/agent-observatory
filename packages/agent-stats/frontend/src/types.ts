@@ -82,8 +82,8 @@ export interface Turn {
   request_coverage?: RequestCoverage;
   estimated_cost_reason: string | null;
   cost_breakdown: { input: number; cached_input: number; output: number } | null;
-  cost_basis?: 'recorded' | 'estimated' | 'mixed' | null;
-  cost_source?: 'provider' | 'model_rates' | 'mixed' | null;
+  cost_basis?: 'recorded' | 'estimated' | 'mixed' | 'free' | null;
+  cost_source?: 'provider' | 'model_rates' | 'mixed' | 'free_waiver' | null;
   recorded_cost_usd?: Metric;
   tools: ToolRecord[];
   evidence: Evidence[];
@@ -106,7 +106,7 @@ export interface Session {
   estimated_cost: Metric;
   estimated_cost_known: Metric;
   cost_samples: number;
-  cost_basis?: 'recorded' | 'estimated' | 'mixed' | null;
+  cost_basis?: 'recorded' | 'estimated' | 'mixed' | 'free' | null;
   recorded_cost?: Metric;
   recorded_cost_known?: Metric;
   recorded_cost_samples?: number;
@@ -134,7 +134,7 @@ export interface Summary {
   estimated_cost_known: Metric;
   observed_estimated_cost_known: Metric;
   cost_samples: number;
-  cost_basis?: 'recorded' | 'estimated' | 'mixed' | null;
+  cost_basis?: 'recorded' | 'estimated' | 'mixed' | 'free' | null;
   recorded_cost?: Metric;
   recorded_cost_known?: Metric;
   recorded_cost_samples?: number;
@@ -143,10 +143,19 @@ export interface Summary {
 export interface Pricing {
   currency: 'USD';
   checked_at: string;
-  source_url: string;
+  sources: { label: string; url: string }[];
   basis: string;
   assumptions: string[];
-  models: Record<string, { input: number; cached_input: number; output: number }>;
+  models: Record<
+    string,
+    {
+      input: number;
+      cached_input: number;
+      output: number;
+      note?: string;
+      off_peak?: { input: number; cached_input: number; output: number };
+    }
+  >;
 }
 export interface Bucket {
   request_coverage?: RequestCoverage;

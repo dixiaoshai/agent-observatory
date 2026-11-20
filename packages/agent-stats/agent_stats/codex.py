@@ -82,7 +82,7 @@ def parse_rollout(path, instance='local'):
                     raise ValueError()
                 p = row['payload']
                 if row.get('type') == 'session_meta':
-                    meta = {k: p.get(k) for k in ('id', 'session_id', 'cwd', 'timestamp', 'parent_id', 'forked_from_id', 'source', 'cli_version')}
+                    meta = {k: p.get(k) for k in ('id', 'session_id', 'cwd', 'timestamp', 'parent_id', 'forked_from_id', 'source', 'cli_version', 'creator_account_id')}
                     meta['recorded_at'] = timestamp(row.get('timestamp'))
                 # Select a bounded title immediately; never retain full input or tool bodies.
                 clean = {k: p.get(k) for k in ('type', 'turn_id', 'root_turn_id', 'model', 'call_id', 'name')}
@@ -415,12 +415,19 @@ def summarize_events(events, meta, warnings=None, instance='local', runtime='cod
         usage_accounting = ('per_session' if not accounting_conflict and not fork_time_uncertain and
                             (meta.get('cli_version') in PER_SESSION_VERSIONS or
                              (accounting_evidence and not accounting_missing)) else 'unknown')
-    return {'id': sid, 'source': runtime, 'instance': instance, 'project': meta.get('cwd'),
-            'started_at': timestamp(meta.get('timestamp')) or next((e[0] for e in events if e[0]), None),
-            'status': 'unknown', 'parent_id': parent if isinstance(parent, str) else None,
-            'forked_from_id': forked_from,
-            'usage_accounting': usage_accounting,
-            'cli_version': meta.get('cli_version'), 'turns': result_turns,
-            **({'usage_projection_version': 2} if runtime in ('pi', 'dsh') else {}),
-            'warnings': warnings, 'revision_at': max((e[0] for e in events if e[0]), default=''),
-            'event_count': len(events)}, warnings
+    result = {'id': sid, 'source': runtime, 'instance': instance, 'project': meta.get('cwd'),
+              'started_at': timestamp(meta.get('timestamp')) or next((e[0] for e in events if e[0]), None),
+              'status': 'unknown', 'parent_id': parent if isinstance(parent, str) else None,
+              'forked_from_id': forked_from,
+              'usage_accounting': usage_accounting,
+              'cli_version': meta.get('cli_version'), 'turns': result_turns,
+              **({'usage_projection_version': 2} if runtime in ('pi', 'dsh') else {}),
+              'warnings': warnings, 'revision_at': max((e[0] for e in events if e[0]), default=''),
+              'event_count': len(events)}
+    # Only the boolean account-scope evidence is kept: the raw identity is not
+    # persisted and logs cannot distinguish a ChatGPT sign-in from agent
+    # identity / PAT use. A missing value remains unknown, never false.
+    account_id = meta.get('creator_account_id')
+    if isinstance(account_id, str) and account_id.strip():
+        result['account_scoped'] = True
+    return result, warnings

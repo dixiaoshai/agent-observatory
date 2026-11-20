@@ -52,6 +52,7 @@ type Event = z.infer<typeof eventSchema>;
 const common = ['turn_id', 'root_turn_id', 'model'];
 const fields: Record<string, string[]> = {
   'session.started': ['cwd', 'parent_session_id', 'forked_from_session_id', 'created_at', 'cli_version', 'title'],
+  'session.auth': ['account_scoped'],
   'session.title': ['title'],
   'turn.context': [], 'turn.started': [], 'turn.completed': [], 'turn.interrupted': [],
   'message.user': ['title'], 'message.assistant': [], 'reasoning.summary': ['available'],
@@ -90,7 +91,16 @@ function validEvent(event: Event): void {
     return;
   }
   if (!event.source) invalid('Missing source reference');
-  if (event.runtime === 'codex' && event.event_id !== sha(JSON.stringify([event.runtime, event.instance_id, event.session_id, event.source!.line]))) invalid('Invalid event ID');
+  const source = event.source!;
+  if (event.runtime === 'codex') {
+    const identity: Array<string | number> = [event.runtime, event.instance_id, event.session_id];
+    // `session.auth` shares its session_meta source line with session.started,
+    // so it keeps source.series and appends a kind discriminator after the line.
+    if (event.kind === 'session.auth' && source.series !== undefined) identity.push(source.series);
+    identity.push(source.line);
+    if (event.kind === 'session.auth') identity.push('session.auth');
+    if (event.event_id !== sha(JSON.stringify(identity))) invalid('Invalid event ID');
+  }
   const permitted = new Set([...common, ...(fields[event.kind] ?? [])]);
   for (const [key, value] of Object.entries(event.data)) {
     if (!permitted.has(key)) invalid('Unexpected metadata field');
@@ -103,6 +113,10 @@ function validEvent(event: Event): void {
   if (typeof d.title === 'string' && Array.from(d.title).length > 80) invalid('Invalid title');
   for (const key of ['input_bytes', 'output_bytes']) if (key in d && d[key] !== null && (!Number.isSafeInteger(d[key]) || Number(d[key]) < 0)) invalid('Invalid size');
   for (const key of ['available', 'rate_limit_only']) if (key in d && typeof d[key] !== 'boolean') invalid('Invalid flag');
+  // `session.auth` carries only a boolean sign-in signal: account-scoped is the
+  // whole meaning of the kind, so it must be present and strictly `true`. The
+  // absence of the kind means unknown auth, never a false claim.
+  if (event.kind === 'session.auth' && d.account_scoped !== true) invalid('Invalid account scoped metadata');
   if ('cost_usd' in d && d.cost_usd !== null
       && (typeof d.cost_usd !== 'number' || !Number.isFinite(d.cost_usd) || d.cost_usd < 0)) invalid('Invalid cost');
   if ('cost_source' in d && d.cost_source !== null && !['provider', 'model_rates'].includes(d.cost_source as string)) invalid('Invalid cost source');

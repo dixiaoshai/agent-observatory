@@ -25,6 +25,7 @@ const PROJECT = 'fixture';
 const SOURCE_PATH = '/selected/rollout-fixture.jsonl';
 
 const eventId = (line) => sha(JSON.stringify([RUNTIME, INSTANCE, SESSION, line]));
+const authEventId = (line) => sha(JSON.stringify([RUNTIME, INSTANCE, SESSION, line, 'session.auth']));
 const eventIdFor = (sessionId, line) => sha(JSON.stringify([RUNTIME, INSTANCE, sessionId, line]));
 const deletionId = () => sha(JSON.stringify([RUNTIME, INSTANCE, SESSION, 'deleted']));
 const recordHash = (line) => sha(`fixture-line-${line}`);
@@ -114,6 +115,35 @@ const deletionPage = page([
 
 // Empty tail: a valid page that advances nothing.
 const emptyMetadataPage = page([], { after: 0, next: 0, hasMore: false, view: 'metadata' });
+
+// Account-scoped session signal. `session.auth` shares the session_meta source
+// line with `session.started`, so its codex identity appends a kind discriminator
+// after the line. The raw account id is never archived; only the boolean.
+const authPage = page([
+  event({
+    seq: 1, line: 1, kind: 'session.started',
+    data: { ...common, cwd: '/workspace/fixture', created_at: '2026-01-01T00:00:00.000Z', cli_version: 'fixture-1.0.0', title: 'Fixture session' },
+    occurredAt: '2026-01-01T00:00:00.000Z',
+  }),
+  {
+    schema_version: 1,
+    event_id: authEventId(1),
+    archive_seq: 2,
+    runtime: RUNTIME,
+    instance_id: INSTANCE,
+    session_id: SESSION,
+    session_key: SESSION_KEY,
+    project_id: PROJECT,
+    kind: 'session.auth',
+    occurred_at: '2026-01-01T00:00:00.000Z',
+    observed_at: '2026-01-01T00:00:01.000Z',
+    native_type: 'fixture.line',
+    source: { path: SOURCE_PATH, line: 1, record_hash: recordHash(1) },
+    data: { turn_id: null, root_turn_id: null, model: null, account_scoped: true },
+    body: null,
+    raw: null,
+  },
+], { after: 0, next: 2, hasMore: false });
 
 // Content view can externalize an oversized value. The reference is valid and
 // consumers must preserve it without reading the path.
@@ -238,6 +268,12 @@ invalid['content-ref-wrong-media-type'] = (() => {
   return value;
 })();
 
+invalid['session-auth-bad-identity'] = (() => {
+  const value = clone(authPage);
+  value.events[1].event_id = 'a'.repeat(64);
+  return value;
+})();
+
 // ---- manifest ------------------------------------------------------------
 const manifest = {
   schema_version: 1,
@@ -253,6 +289,7 @@ const manifest = {
     { file: 'valid/content-deletion-page.json', view: 'content', valid: true, layer: 'page', expect: { follow: 'accept', import: 'accept' }, notes: 'Must be applied after content-page-1 with cursor 6; the tombstone erases the session evidence.' },
     { file: 'valid/metadata-empty-page.json', view: 'metadata', valid: true, layer: 'page', expect: { follow: 'accept (metadata consumer)', import: 'not applicable (content-only importer)' }, notes: 'Empty tail may advance nothing; metadata consumers only.' },
     { file: 'valid/content-ref-page.json', view: 'content', valid: true, layer: 'page', expect: { follow: 'accept', import: 'accept' }, notes: 'Body carries a valid content_ref; consumers must not read the path during import/search.' },
+    { file: 'valid/content-auth-page.json', view: 'content', valid: true, layer: 'page', expect: { follow: 'accept', import: 'accept' }, covers: ['session.started', 'session.auth'], notes: 'Account-scoped session signal. session.auth shares the session_meta source line with session.started; its codex identity appends "session.auth" after the line. Only the boolean is archived, never the raw account id.' },
     { file: 'invalid/unsupported-version.json', valid: false, layer: 'page', reason: 'batch schema_version is not 1', expected_code: { follow: 'INVALID_PAGE', import: 'INVALID_ARCHIVE' } },
     { file: 'invalid/unknown-envelope-field.json', valid: false, layer: 'page', reason: 'unknown batch field', expected_code: { follow: 'INVALID_PAGE', import: 'INVALID_ARCHIVE' } },
     { file: 'invalid/wrong-view.json', valid: false, layer: 'page', reason: 'view does not match the consumer binding', expected_code: { follow: 'INVALID_PAGE', import: 'INVALID_ARCHIVE' } },
@@ -269,6 +306,7 @@ const manifest = {
     { file: 'invalid/negative-usage.json', valid: false, layer: 'event', reason: 'usage token counts must be nonnegative integers', expected_code: { follow: 'INVALID_PAGE', import: 'INVALID_ARCHIVE' } },
     { file: 'invalid/content-ref-relative-path.json', valid: false, layer: 'event', reason: 'content_ref.path must be absolute', expected_code: { follow: 'INVALID_PAGE', import: 'INVALID_ARCHIVE' } },
     { file: 'invalid/content-ref-wrong-media-type.json', valid: false, layer: 'event', reason: 'content_ref.media_type must be text/plain', expected_code: { follow: 'INVALID_PAGE', import: 'INVALID_ARCHIVE' } },
+    { file: 'invalid/session-auth-bad-identity.json', valid: false, layer: 'event', reason: 'session.auth codex identity must append the kind discriminator after source.line', expected_code: { follow: 'INVALID_PAGE', import: 'INVALID_ARCHIVE' } },
   ],
 };
 
@@ -283,6 +321,7 @@ writeJson('valid/content-page-1.json', contentPage);
 writeJson('valid/content-deletion-page.json', deletionPage);
 writeJson('valid/metadata-empty-page.json', emptyMetadataPage);
 writeJson('valid/content-ref-page.json', refPage);
+writeJson('valid/content-auth-page.json', authPage);
 for (const [name, value] of Object.entries(invalid)) writeJson(`invalid/${name}.json`, value);
 writeJson('manifest.json', manifest);
 
@@ -296,6 +335,7 @@ assert(deletionPage.events[0].event_id === deletionId(), 'bad deletion event id'
 assert(new Set(contentPage.events.map((item) => item.event_id)).size === contentPage.events.length, 'duplicate event ids in valid page');
 assert(refPage.events[0].event_id === eventIdFor(refSession, 1), 'bad content_ref event id');
 assert(refPage.events[0].session_key === refSessionKey, 'bad content_ref session key');
-assert(manifest.fixtures.length === 4 + Object.keys(invalid).length, 'manifest does not cover every fixture');
+assert(authPage.events[1].event_id === authEventId(1), 'bad session.auth event id');
+assert(manifest.fixtures.length === 5 + Object.keys(invalid).length, 'manifest does not cover every fixture');
 
-process.stdout.write(`wrote ${4 + Object.keys(invalid).length + 1} fixtures to ${here}\n`);
+process.stdout.write(`wrote ${5 + Object.keys(invalid).length + 1} fixtures to ${here}\n`);

@@ -81,7 +81,7 @@ export function normalize(
   const sessionTitle = title(titles?.(sessionId));
   const observedAt = new Date().toISOString();
   const selected = metas.length === 1 ? records : records.filter(record => record.row.type !== 'session_meta' || record === finalMeta);
-  return selected.map(({ row, line, record_hash }) => {
+  return selected.flatMap(({ row, line, record_hash }) => {
     const p = object(row.payload)!;
     const data: JsonObject = {
       turn_id: typeof p.turn_id === 'string' ? p.turn_id : null,
@@ -145,7 +145,7 @@ export function normalize(
         body = { output: p.output ?? null };
       }
     } else if (row.type === 'compacted') { kind = 'context.compacted'; body = { text: text(p.message ?? p.summary) }; }
-    return {
+    const events: Event[] = [{
       schema_version: 1,
       event_id: hash(JSON.stringify(['codex', instance, sessionId, ...(series ? [series] : []), line])),
       archive_seq: 0,
@@ -154,6 +154,27 @@ export function normalize(
       native_type: row.type + (subtype ? '.' + subtype : ''),
       source: { path: sourcePath, line, record_hash, ...(series ? { series } : {}) }, data,
       body: mode === 'content' ? body : null, raw: mode === 'content' ? row : null,
-    };
+    }];
+    // Account-scoped sign-in is a boolean-only signal derived from the
+    // authoritative session_meta. The raw account ID is deliberately never
+    // copied; absence means unknown, not API-key auth. The event shares the
+    // session_meta source line with session.started, so its identifier appends
+    // a kind discriminator after the line instead of colliding with it.
+    const accountId = p.creator_account_id;
+    if (row === finalMeta.row && typeof accountId === 'string' && accountId.trim().length > 0) {
+      events.push({
+        schema_version: 1,
+        event_id: hash(JSON.stringify(['codex', instance, sessionId, ...(series ? [series] : []), line, 'session.auth'])),
+        archive_seq: 0,
+        runtime: 'codex', instance_id: instance, session_id: sessionId, session_key: sessionKey, project_id: project,
+        kind: 'session.auth',
+        occurred_at: timestamp(row.timestamp), observed_at: observedAt,
+        native_type: 'session_meta',
+        source: { path: sourcePath, line, record_hash, ...(series ? { series } : {}) },
+        data: { turn_id: null, root_turn_id: null, model: null, account_scoped: true },
+        body: null, raw: null,
+      });
+    }
+    return events;
   });
 }

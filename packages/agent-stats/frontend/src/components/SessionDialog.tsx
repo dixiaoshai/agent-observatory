@@ -192,10 +192,14 @@ function TurnDetail({ turn }: { turn: Turn }) {
     [
       turn.cost_basis === 'recorded'
         ? '记录费用'
-        : turn.cost_basis === 'mixed'
-          ? '记录 / 估算费用'
-          : 'API 等价估算费用',
-      `${turnCost(turn)} USD · 非实际账单${turn.estimated_cost_reason ? ` · ${turn.estimated_cost_reason}` : ''}`,
+        : turn.cost_basis === 'free'
+          ? '自动审查费用（账号范围免费）'
+          : turn.cost_basis === 'mixed'
+            ? '记录 / 估算费用'
+            : 'API 等价估算费用',
+      `${turnCost(turn)} USD · ${
+        turn.cost_basis === 'free' ? '账号范围免费 · ' : ''
+      }非实际账单${turn.estimated_cost_reason ? ` · ${turn.estimated_cost_reason}` : ''}`,
     ],
     ...(turn.api_estimated_cost_known != null || turn.api_estimated_cost != null
       ? [
@@ -270,8 +274,9 @@ function TurnDetail({ turn }: { turn: Turn }) {
         ))}
       </details>
       <p className="detail-note">
-        估算基于当前 API
-        标准短上下文单价；未记录缓存写入时按无单独计费写入估算，未还原请求级长上下文加价或工具附加费。
+        估算基于当前公开 API 列表价（OpenAI Standard 短上下文、DeepSeek 峰谷价）；Codex
+        记录的账号范围会话中，自动审查自 2026-10-06 起按 $0 记录。
+        未记录缓存写入时按无单独计费写入估算，未还原请求级长上下文加价、服务等级或工具附加费。
         实际账单与模型请求数未知；字节数不换算为 Token，分类字段不重复相加。
       </p>
     </article>

@@ -37,6 +37,7 @@ generate.mjs                   # 唯一事实来源；修改后重新运行
 
 - 所有事件的 `session_key = JSON.stringify([runtime, instance_id, session_id])`。
 - Codex `event_id = sha256(JSON.stringify([runtime, instance_id, session_id, source.line]))`；存在 `source.series` 时加入（这些 fixtures 未使用）。
+- Codex `session.auth` 与 `session.started` 共用同一条 `session_meta` 来源行，因此其 `event_id` 在 `source.line` 之后追加 `"session.auth"` 区分符：`sha256(JSON.stringify([runtime, instance_id, session_id, ...(source.series?[series]:[]), source.line, "session.auth"]))`。仅该 kind 使用该标识规则；`data` 只允许 `account_scoped: true`，不保存原始账号 ID。
 - 删除事件 `event_id = sha256(JSON.stringify([runtime, instance_id, session_id, "deleted"]))`，`source`、`body`、`raw` 为 null，`data` 为空。
 - 页面内 `archive_seq` 严格递增，绝不超过 `next_cursor`，且页面总从消费方已提交游标开始。
 - 用量 token 数为非负整数；缺失字段表示未知，不是零。

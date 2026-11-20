@@ -21,7 +21,7 @@ const specs: Record<Metric, { label: string; unit: string; description: string }
   cost: {
     label: '估算费用',
     unit: 'USD',
-    description: 'API 标准短上下文单价估算。蓝：未缓存输入 · 灰蓝：缓存输入 · 褐：输出。',
+    description: '当前公开 API 列表价估算。蓝：未缓存输入 · 灰蓝：缓存输入 · 褐：输出。',
   },
   cache: {
     label: '缓存输入',

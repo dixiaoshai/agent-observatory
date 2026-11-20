@@ -1,5 +1,6 @@
 """Source-recorded costs and current API equivalents, never account billing."""
 import math
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from .usage import aggregate_request_coverage
@@ -7,23 +8,59 @@ from .usage import aggregate_request_coverage
 
 PRICING = {
     'currency': 'USD',
-    'checked_at': '2026-11-08',
-    'source_url': 'https://developers.openai.com/api/docs/pricing?latest-pricing-expanded=true',
-    'basis': '当前 API Standard 短上下文价格',
+    'checked_at': '2026-11-20',
+    'sources': [
+        {'label': 'OpenAI 官方价格',
+         'url': 'https://developers.openai.com/api/docs/pricing?latest-pricing-expanded=true'},
+        {'label': 'DeepSeek 官方价格',
+         'url': 'https://api-docs.deepseek.com/quick_start/pricing/'},
+    ],
+    'basis': '当前公开 API 列表价估算（OpenAI Standard 短上下文；DeepSeek peak 时段）',
     'assumptions': [
-        '按当前单价估算历史 Token 的 API 等价费用，不是实际账单或订阅扣费。',
-        '按 Standard 短上下文费率估算；轮次聚合无法还原逐请求长上下文加价或实际服务等级。',
-        '未记录缓存写入时按无单独计费写入估算；已记录写入但缺少 TTL 时无法估算。',
+        '按当前公开单价估算历史 Token 的 API 等价费用，不是实际账单或订阅扣费。',
+        'OpenAI 模型按 Standard 短上下文费率；轮次聚合无法还原逐请求长上下文加价或实际服务等级。',
+        'DeepSeek 模型按请求时间套用 peak / off-peak 价：UTC 周一至周五 01:00–04:00、06:00–10:00 为 peak，'
+        '其余时段（含周末）为 off-peak 半价；中国法定节假日未还原，缺少请求时间时按 peak 价上限估算。',
+        'DeepSeek 的缓存命中价对应缓存输入、未命中价对应普通输入；未记录缓存写入时按无单独计费写入估算，'
+        '已记录写入但缺少 TTL 时无法估算。',
         '普通输入 = 输入 − 缓存输入；推理已包含在输出中，不再相加。不含工具等附加费。',
         '无匹配公开单价或缺少有效分类用量时保留未知；覆盖不完整时仅展示已知小计。',
+        'codex-auto-review 没有公开列表价；仅当来源明确标记会话为账号范围（account_scoped=true）且轮次开始时间不早于 '
+        '2026-10-06T00:00:00Z 时按免费规则估算（费用 0），其他情况保持未知。该标记来自 Codex 的 creator_account_id，'
+        'Codex 对 Agent 身份 / PAT 也可能记录该字段，日志无法区分登录方式；缺少标记表示登录方式未知，不按 API Key 处理。',
         '父子按各会话新增用量合计；分叉历史基线无法确认时保留未知。',
     ],
     # USD per million tokens. Exact model IDs only: no guessed family aliases.
+    # DeepSeek entries list the peak rate; off_peak is applied per request time.
     'models': {
+        'gpt-6.2-astra': {'input': 8, 'cached_input': .40, 'output': 40},
+        'gpt-6.2-sol': {'input': 2, 'cached_input': .10, 'output': 10},
         'gpt-6-astra': {'input': 10, 'cached_input': 1, 'output': 50},
         'gpt-6.1-sol': {'input': 2, 'cached_input': .10, 'output': 10},
         'gpt-6.1-terra': {'input': 1, 'cached_input': .05, 'output': 5},
         'gpt-6-luna': {'input': .10, 'cached_input': .01, 'output': .50},
+        'gpt-5.6-sol': {'input': 4, 'cached_input': .40, 'output': 20,
+                        'note': '2026-11-30 前促销价'},
+        'gpt-5.6-terra': {'input': 2, 'cached_input': .20, 'output': 12},
+        'gpt-5.6-luna': {'input': .20, 'cached_input': .02, 'output': 1.20},
+        'gpt-5.5': {'input': 5, 'cached_input': .50, 'output': 30, 'note': '低于 272K 上下文的短上下文价'},
+        'gpt-5.4': {'input': 2.5, 'cached_input': .25, 'output': 15, 'note': '低于 272K 上下文的短上下文价'},
+        'deepseek-flash': {
+            'input': .30, 'cached_input': .006, 'output': 1.20,
+            'off_peak': {'input': .15, 'cached_input': .003, 'output': .60},
+            'note': 'peak 价；off-peak 半价',
+        },
+        # Official legacy name, still accepted by the provider and billed at the Flash rate.
+        'deepseek-v4-flash': {
+            'input': .30, 'cached_input': .006, 'output': 1.20,
+            'off_peak': {'input': .15, 'cached_input': .003, 'output': .60},
+            'note': '旧名；按 deepseek-flash 计价',
+        },
+        'deepseek-v4-pro': {
+            'input': 1.32, 'cached_input': .044, 'output': 3.96,
+            'off_peak': {'input': .66, 'cached_input': .022, 'output': 1.98},
+            'note': 'peak 价；off-peak 半价',
+        },
     },
 }
 
@@ -31,6 +68,53 @@ PRICING = {
 def _amount(value):
     # Keep sub-cent values; round only floating-point transport noise.
     return float(round(value, 12))
+
+
+def _time(value):
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(timezone.utc)
+
+
+def _is_off_peak(value):
+    """DeepSeek peak window; unknown or missing time keeps the peak (upper bound) rate."""
+    moment = _time(value)
+    if moment is None:
+        return False
+    if moment.weekday() >= 5:
+        return True
+    minutes = moment.hour * 60 + moment.minute
+    return not (60 <= minutes < 240 or 360 <= minutes < 600)
+
+
+def _rates(model, at):
+    entry = PRICING['models'].get(model)
+    if entry is None:
+        return None
+    off_peak = entry.get('off_peak')
+    if off_peak is not None and _is_off_peak(at):
+        return off_peak
+    return {key: entry[key] for key in ('input', 'cached_input', 'output')}
+
+
+def _is_free_waived(turn):
+    """Codex auto-review is free for account-scoped sign-ins from the fixed date.
+
+    The archived ``account_scoped`` signal only proves that the source recorded a
+    creator account id: Codex also records it for agent identity / PAT use, so it
+    cannot confirm a ChatGPT sign-in. Only this narrow, dated rule is waived and
+    every other auto-review turn stays unknown.
+    """
+    if turn.get('model') != 'codex-auto-review' or turn.get('account_scoped') is not True:
+        return False
+    started = _time(turn.get('started_at'))
+    return started is not None and started >= datetime(2026, 10, 6, tzinfo=timezone.utc)
 
 
 def estimate_turn(turn):
@@ -65,7 +149,13 @@ def estimate_turn(turn):
             return result
         return unavailable('记录成本无效')
 
-    rates = PRICING['models'].get(turn.get('model'))
+    if _is_free_waived(turn):
+        result['estimated_cost'] = 0
+        result['cost_basis'] = 'free'
+        result['cost_source'] = 'free_waiver'
+        return result
+
+    rates = _rates(turn.get('model'), turn.get('at') or turn.get('started_at'))
     if rates is None:
         return unavailable('模型没有匹配的公开单价')
     fields = [turn.get(k) for k in ('input_tokens', 'cached_input_tokens', 'output_tokens')]
@@ -103,7 +193,7 @@ def _estimate_records(turn):
     records = turn['usage_records']
     estimates = []
     for record in records:
-        facts = dict(record['usage'], model=record['model'])
+        facts = dict(record['usage'], model=record['model'], at=record.get('timestamp'))
         facts['token_total'] = facts.pop('total_tokens', None)
         estimates.append(estimate_turn(facts))
     api_values = [r['estimated_cost'] for r in estimates if r['estimated_cost'] is not None]

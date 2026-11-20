@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "archive_id": "00000000-0000-4000-8000-000000000001",
+  "view": "content",
+  "after_cursor": 0,
+  "next_cursor": 2,
+  "has_more": false,
+  "events": [
+    {
+      "schema_version": 1,
+      "event_id": "ed456596e19d3bb5848d7cebec7e6078a69fdc01e55c4730e73bd2d94f196c7b",
+      "archive_seq": 1,
+      "runtime": "codex",
+      "instance_id": "fixture-device",
+      "session_id": "11111111-2222-4333-8444-555555555555",
+      "session_key": "[\"codex\",\"fixture-device\",\"11111111-2222-4333-8444-555555555555\"]",
+      "project_id": "fixture",
+      "kind": "session.started",
+      "occurred_at": "2026-01-01T00:00:00.000Z",
+      "observed_at": "2026-01-01T00:00:01.000Z",
+      "native_type": "fixture.line",
+      "source": {
+        "path": "/selected/rollout-fixture.jsonl",
+        "line": 1,
+        "record_hash": "c4c3492d69824aaa4c8251401f043e158f212d95030b15bda8545c8cf17e16c2"
+      },
+      "data": {
+        "turn_id": "turn-1",
+        "root_turn_id": null,
+        "model": "fixture-model",
+        "cwd": "/workspace/fixture",
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "cli_version": "fixture-1.0.0",
+        "title": "Fixture session"
+      },
+      "body": null,
+      "raw": null
+    },
+    {
+      "schema_version": 1,
+      "event_id": "45dd1d34c977f7a356a700b6c85a214f0a064207d62d025f435689615bcffc33",
+      "archive_seq": 2,
+      "runtime": "codex",
+      "instance_id": "fixture-device",
+      "session_id": "11111111-2222-4333-8444-555555555555",
+      "session_key": "[\"codex\",\"fixture-device\",\"11111111-2222-4333-8444-555555555555\"]",
+      "project_id": "fixture",
+      "kind": "session.auth",
+      "occurred_at": "2026-01-01T00:00:00.000Z",
+      "observed_at": "2026-01-01T00:00:01.000Z",
+      "native_type": "fixture.line",
+      "source": {
+        "path": "/selected/rollout-fixture.jsonl",
+        "line": 1,
+        "record_hash": "c4c3492d69824aaa4c8251401f043e158f212d95030b15bda8545c8cf17e16c2"
+      },
+      "data": {
+        "turn_id": null,
+        "root_turn_id": null,
+        "model": null,
+        "account_scoped": true
+      },
+      "body": null,
+      "raw": null
+    }
+  ]
+}

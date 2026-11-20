@@ -173,6 +173,7 @@ Journal 使用自己的 SQLite（默认权限 0600）：
 | 输入事件 | 处理 |
 | --- | --- |
 | `session.started` | 首次观测快照：cwd、runtime、cli_version |
+| `session.auth` | 账户级登录信号（`account_scoped` 为 `true` 的元数据）；只计数，不进入日报正文，缺失表示未知 |
 | `session.title` | 采用最新非空修订；空修订不覆盖已知名称 |
 | `message.user` | 最多 20 条、每条 1,200 字符；过滤 `# AGENTS.md instructions`、`<INSTRUCTIONS>`、`<environment_context>`、`<external_…>` 等注入块 |
 | `turn.completed` | 最多 8 条、每条 1,500 字符，作为最终答复 |

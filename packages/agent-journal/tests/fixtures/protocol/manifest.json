@@ -60,6 +60,21 @@
       "notes": "Body carries a valid content_ref; consumers must not read the path during import/search."
     },
     {
+      "file": "valid/content-auth-page.json",
+      "view": "content",
+      "valid": true,
+      "layer": "page",
+      "expect": {
+        "follow": "accept",
+        "import": "accept"
+      },
+      "covers": [
+        "session.started",
+        "session.auth"
+      ],
+      "notes": "Account-scoped session signal. session.auth shares the session_meta source line with session.started; its codex identity appends \"session.auth\" after the line. Only the boolean is archived, never the raw account id."
+    },
+    {
       "file": "invalid/unsupported-version.json",
       "valid": false,
       "layer": "page",
@@ -214,6 +229,16 @@
       "valid": false,
       "layer": "event",
       "reason": "content_ref.media_type must be text/plain",
+      "expected_code": {
+        "follow": "INVALID_PAGE",
+        "import": "INVALID_ARCHIVE"
+      }
+    },
+    {
+      "file": "invalid/session-auth-bad-identity.json",
+      "valid": false,
+      "layer": "event",
+      "reason": "session.auth codex identity must append the kind discriminator after source.line",
       "expected_code": {
         "follow": "INVALID_PAGE",
         "import": "INVALID_ARCHIVE"

@@ -174,6 +174,7 @@ export interface EventOverrides {
   occurredAt?: string | null;
   observedAt?: string;
   line?: number;
+  series?: string;
 }
 
 /** Minimal valid codex event, used to build synthetic pages in tests. */
@@ -183,9 +184,15 @@ export function codexEvent(overrides: EventOverrides): PageEvent {
   const sessionId = overrides.sessionId ?? '11111111-2222-4333-8444-555555555555';
   const line = overrides.line ?? lineCounter++;
   const common = { turn_id: 'turn-1', root_turn_id: null, model: 'test-model' };
+  // `session.auth` shares its session_meta line with session.started, so its
+  // identity appends a kind discriminator after the line.
+  const identity: Array<string | number> = [runtime, instanceId, sessionId];
+  if (overrides.series !== undefined) identity.push(overrides.series);
+  identity.push(line);
+  if (overrides.kind === 'session.auth') identity.push('session.auth');
   return {
     schema_version: 1,
-    event_id: sha256(JSON.stringify([runtime, instanceId, sessionId, line])),
+    event_id: sha256(JSON.stringify(identity)),
     archive_seq: overrides.seq,
     runtime,
     instance_id: instanceId,
@@ -196,7 +203,12 @@ export function codexEvent(overrides: EventOverrides): PageEvent {
     occurred_at: overrides.occurredAt ?? '2026-01-01T10:00:00.000Z',
     observed_at: overrides.observedAt ?? '2026-01-01T10:00:01.000Z',
     native_type: 'test.line',
-    source: { path: '/selected/test.jsonl', line, record_hash: sha256(`line-${line}`) },
+    source: {
+      path: '/selected/test.jsonl',
+      line,
+      record_hash: sha256(`line-${line}`),
+      ...(overrides.series !== undefined ? { series: overrides.series } : {}),
+    },
     data: { ...common, ...(overrides.data ?? {}) },
     body: overrides.body === undefined ? null : overrides.body,
     raw: overrides.raw === undefined ? null : overrides.raw,

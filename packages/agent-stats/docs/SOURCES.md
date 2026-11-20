@@ -25,6 +25,7 @@ Trace 的 pi / dsh 输入在 `usage_records` 中保留逐调用字段存在性�
 
 - 只有在每条相关观测都提供该字段时，`token_total` 与各 Token 分类才是在**观测记录范围内**完整的；`token_known` 与 `usage_known` 在部分轮次中仍保留已知小计。缺失字段保持 null，即使后续请求报告了值或显式零。
 - `recorded_cost_usd` 只对每条观测都有成本的、可归属的观测记录完整；`recorded_cost_known_usd` 是它们的已知小计。只要存在任一记录成本，`estimated_cost` / `estimated_cost_known` 就保留该记录成本口径：缺失费用绝不用今天的价目表补齐。`api_estimated_cost` / `api_estimated_cost_known` 另行暴露当前 API 等价估算。若不存在记录成本，旧的 `estimated_cost` 字段使用该估算。`provider` 与 harness `model_rates` 是不同的来源依据，二者都不承诺是完整账单。
+- 会话级 `account_scoped` 仅在来源明确记录账号范围时出现且为 `true`；缺失表示登录方式未知，不编码为 API Key 或 `false`。Codex 原生 `session_meta.creator_account_id` 与归档 `session.auth` 事件只保留这一布尔含义，不保存原始账号 ID；同一会话有多份 rollout 时只采用被选中修订的证据。模型 `codex-auto-review` 且 `account_scoped` 为 `true`、轮次 `started_at >= 2026-10-06T00:00:00Z` 时，费用按免费规则返回 `estimated_cost=0`、`cost_basis='free'`、`cost_source='free_waiver'` 且无分类明细；其他情况仍保持未知。`creator_account_id` 也会用于 Codex Agent 身份 / PAT，日志无法区分登录方式，因此该信号不等于已确认的 ChatGPT 登录。
 - 轮次（有观测时）、会话、汇总、模型 / 日期分组与详情会话上的 `request_coverage` 带有 `scope=observed_usage_records`，统计有 / 无用量、有 / 无成本的观测记录数以及逐字段存在情况。当前所有输入的 `total_requests`、`usage_ratio`、`cost_ratio` 均为 **null**。不要把 assistant 消息数、Token 快照或 `cost_samples / turns` 当作请求覆盖。`unresolved_turns` 包含缺失或被隔离的观测；`attribution_uncertain_turns` 标记可能重叠的分叉观测。
 - 分叉时间未知会导致成本不完整并阻断去重聚合，只保留带标注的观测小计。看板会把这些与已知可归属合计区分开，并始终把实际请求覆盖标为未知。
 

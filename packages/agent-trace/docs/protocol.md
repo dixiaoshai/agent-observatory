@@ -53,7 +53,7 @@
 
 在 metadata 视图中，`body` 和 `raw` **始终**为 null，`data` 只包含白名单负载。content 视图只在捕获过内容时提供它们；未捕获的内容保持 null。在 content 模式下，`body` 和 `raw` 是**脱敏与外置之后**的解析记录；`source.record_hash` 仍标识原始行字节（不含 LF，CRLF 时也不含 CR），因此它声明来源，而不是脱敏副本的哈希。`body` 是便于读取的表示，从来不是权威的完整源记录。消费方用 `event_id` 引用证据。`occurred_at` 在缺失或非法时为 null；导入顺序仍然可用。`runtime` 标识宿主，与模型提供方和模型名分开。
 
-对 Codex v1 适配器，`event_id = SHA256(JSON.stringify([runtime, instance_id, session_id, one_based_line_number]))`。复制 / 移动保持身份。两**不同**行上的相同内容不会去重。可用时保留原生 ID 与解析器版本；未来的适配器可以使用原生 ID 代替序号位置。事件身份不得依赖归一化版本。未知记录保持为 `source.unknown`，在捕获时保留原始原生类型和原始负载。
+对 Codex v1 适配器，`event_id = SHA256(JSON.stringify([runtime, instance_id, session_id, one_based_line_number]))`。唯一例外是同一条 `session_meta` 源行上的 `session.auth`，它在行号之后追加 kind 区分项（见[归一化类型](#normalized-kinds-and-allowlisted-data)）。复制 / 移动保持身份。两**不同**行上的相同内容不会去重。可用时保留原生 ID 与解析器版本；未来的适配器可以使用原生 ID 代替序号位置。事件身份不得依赖归一化版本。未知记录保持为 `source.unknown`，在捕获时保留原始原生类型和原始负载。
 
 一个会话身份可能由多个 rollout 文件覆盖，Codex 也可能原地重写某个 rollout。归档对每个会话只保留一个 revision：取最后事件时间最大的文件，再取记录数最多的文件。更新的 revision 替换旧 revision；相同 revision 原地协调（同一路径中变化的记录被替换，未变化的记录保留 `event_id` 与序列位置；从另一路径读到有变化的获胜 revision 时整体替换，使会话头与用量保持同一来源，相同副本仍不重复导入）；更旧的 revision 直接跳过而不回滚。已有会话的项目变更仍以 `SOURCE_CONFLICT` 失败。旧版分页只返回当前还存在的普通事件，不传播 revision 移除；需要同步这些变化的客户端必须显式协商下述扩展。
 
@@ -74,6 +74,7 @@
 | 事件类型（kind） | 附加 metadata 字段 | 内容正文 |
 |---|---|---|
 | `session.started` | `cwd`、`parent_session_id`、`forked_from_session_id`、`created_at`、`cli_version`、可选 `title`（单行，最多 80 字符，从来源旁读取） | null |
+| `session.auth` | `account_scoped` 布尔值；仅 Codex 且只有 `true` | null |
 | `session.title` | `title`（单行，最多 80 字符） | null |
 | `turn.context` | 无附加字段 | null |
 | `turn.started` | 无附加字段 | null |
@@ -90,6 +91,8 @@
 | `session.deleted` | 无附加字段 | null |
 
 `session.started.title` 是首次观测快照。宿主可能在会话开始后修订显示名；每个可用的修订是一条独立的 `session.title` 事件（最新者生效）。展示会话名的消费方必须优先使用最新的非空 `session.title`，并把缺失 / 空修订视为未知，而不是抹掉已知名称。该 kind 从不携带正文，也不改变会话身份、父子关系或统计。该 kind 是对 v1 的扩展：严格消费方必须先升级；旧消费方会失败关闭，而不是追加证据。
+
+`session.auth` 仅由 Codex 适配器发出：当权威 `session_meta` 的 `creator_account_id` 是非空（trim 后）字符串时，在同一个 rollout 的 `session.started` 之后追加一条。它把会话标记为账户作用域；ChatGPT 登录、agent identity 与 PAT 都会记录该字段，日志无法进一步区分，因此消费方只能把它当作“账户作用域”信号，字段缺失、空串或非字符串表示**未知**，而不是 API key 认证。该 kind 只暴露布尔值 `account_scoped: true`，绝不复制或派生原始账户 ID；`data` 固定为 `{"turn_id": null, "root_turn_id": null, "model": null, "account_scoped": true}`，`body` / `raw` 在两种视图中始终为 null，`occurred_at` 取该 `session_meta` 行的时间戳。由于它与 `session.started` 共用同一条源行，事件身份在通用元组之后追加区分项：`SHA256(JSON.stringify([runtime, instance_id, session_id, ...(series ? [series] : []), line, "session.auth"]))`；其他 kind 的身份不变。该 kind 是对 v1 的扩展：必须先升级消费方，旧的严格消费方会失败关闭且不推进游标。既有归档不需要提升投影版本：采集器重新读取源文件或 `reingest --config` 协调时以新事件追加，已有事件的身份不变。
 
 content 模式的正文可以用 `content_ref` 对象代替超过 Trace 内联上限的字符串：
 

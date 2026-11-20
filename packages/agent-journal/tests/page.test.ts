@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JournalError } from '../src/errors.ts';
 import { pageFingerprint, validatePage, type Page } from '../src/trace/page.ts';
-import { codexEvent, deletionEvent, fixturePage, loadFixture, pageOf } from './helpers.ts';
+import { codexEvent, deletionEvent, fixturePage, loadFixture, pageOf, sha256 } from './helpers.ts';
 
 const ARCHIVE = '00000000-0000-4000-8000-000000000001';
 const OPTIONS = { after: 0, archiveId: ARCHIVE, allowedProjects: ['fixture'], maxEvents: 100 };
@@ -28,6 +28,17 @@ function mixedPage(options: { malformedForeign?: boolean } = {}): Page {
 test('vendored conformance fixtures exist in this module', () => {
   const manifest = loadFixture('manifest.json') as { fixtures: Array<{ file: string; valid: boolean }> };
   assert.ok(manifest.fixtures.length >= 20);
+});
+
+test('all valid content fixtures are accepted', () => {
+  const manifest = loadFixture('manifest.json') as { fixtures: Array<{ file: string; view: string; valid: boolean }> };
+  const valid = manifest.fixtures.filter((entry) => entry.valid && entry.view === 'content');
+  assert.ok(valid.length >= 4);
+  for (const fixture of valid) {
+    const page = fixturePage(fixture.file);
+    const book = validatePage(page, { ...OPTIONS, after: page.after_cursor });
+    assert.ok(book.events.length > 0, fixture.file);
+  }
 });
 
 test('accepts valid content, deletion and content_ref pages', () => {
@@ -60,6 +71,46 @@ test('accepts session.title revisions as display metadata', () => {
     codexEvent({ seq: 1, kind: 'session.title', line: 101, data: { title: 'ok', cwd: '/demo' } }),
   ]);
   assert.throws(() => validatePage(unexpected, OPTIONS), isInvalidPage);
+});
+
+test('accepts session.auth as account-scoped metadata on its extended codex identity', () => {
+  const authData = { turn_id: null, root_turn_id: null, model: null, account_scoped: true };
+  // session.auth shares the authoritative session_meta source line with
+  // session.started, so both events appear on the same line with distinct IDs.
+  const content = validatePage(pageOf([
+    codexEvent({ seq: 1, kind: 'session.started', line: 101 }),
+    codexEvent({ seq: 2, kind: 'session.auth', line: 101, data: authData }),
+    codexEvent({ seq: 3, kind: 'session.started', line: 202, series: 'child-rollout' }),
+    codexEvent({ seq: 4, kind: 'session.auth', line: 202, series: 'child-rollout', data: authData }),
+  ]), OPTIONS);
+  assert.deepEqual(content.events.map((event) => event.kind),
+    ['session.started', 'session.auth', 'session.started', 'session.auth']);
+  assert.deepEqual(content.events[1]?.data, authData);
+  assert.equal(content.events[1]?.source?.line, 101);
+  assert.equal(content.events[3]?.source?.series, 'child-rollout');
+
+  const rejected: Page[] = [];
+  // The old line-only identity does not identify session.auth.
+  const legacyIdentity = codexEvent({ seq: 1, kind: 'session.auth', line: 101, data: authData });
+  legacyIdentity.event_id = sha256(JSON.stringify(['codex', legacyIdentity.instance_id, legacyIdentity.session_id, 101]));
+  rejected.push(pageOf([legacyIdentity]));
+  // A series rollout must keep source.series in the identity.
+  const seriesIdentity = codexEvent({ seq: 1, kind: 'session.auth', line: 101, series: 'child-rollout', data: authData });
+  seriesIdentity.event_id = sha256(JSON.stringify(['codex', seriesIdentity.instance_id, seriesIdentity.session_id, 101, 'session.auth']));
+  rejected.push(pageOf([seriesIdentity]));
+  // account_scoped is the whole meaning of the kind: it must be strictly true.
+  for (const account_scoped of [false, 'true', 1, undefined]) {
+    const data: Record<string, unknown> = { turn_id: null, root_turn_id: null, model: null };
+    if (account_scoped !== undefined) data.account_scoped = account_scoped;
+    rejected.push(pageOf([codexEvent({ seq: 1, kind: 'session.auth', line: 101, data })]));
+  }
+  // The kind discriminator applies to session.auth only; other kinds keep the
+  // line-only identity.
+  const title = codexEvent({ seq: 1, kind: 'session.title', line: 101, data: { title: 'ok' } });
+  title.event_id = sha256(JSON.stringify(['codex', title.instance_id, title.session_id, 101, 'session.title']));
+  rejected.push(pageOf([title]));
+
+  for (const page of rejected) assert.throws(() => validatePage(page, OPTIONS), isInvalidPage);
 });
 
 test('request usage metadata accepts observed identities and rejects invalid combinations', () => {

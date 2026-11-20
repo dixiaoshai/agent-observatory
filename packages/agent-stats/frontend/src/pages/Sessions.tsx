@@ -238,10 +238,10 @@ export function Sessions({ data, onSelect }: { data: Overview; onSelect: (s: Sel
         </div>
       </div>
       <p className="footnote">
-        费用可能为来源记录成本或按当前 API
-        标准短上下文单价估算，非实际账单；未记录缓存写入时按无单独计费写入估算，
-        未还原请求级长上下文加价或工具附加费。未知模型或用量不参与估算。缓存和推理不重复计入 Token
-        总量；{coverageText(data.summary.request_coverage)}。时间按{' '}
+        费用可能为来源记录成本、账号范围下的免费自动审查或按当前公开 API
+        列表价估算，非实际账单；未记录缓存写入时按无单独计费写入估算，
+        未还原请求级长上下文加价、服务等级或工具附加费。未知模型或用量不参与估算。缓存和推理不重复计入
+        Token 总量；{coverageText(data.summary.request_coverage)}。时间按{' '}
         {Intl.DateTimeFormat().resolvedOptions().timeZone} 显示。
       </p>
     </section>
@@ -408,7 +408,9 @@ function TurnTable({
                 title={
                   t.cost_basis === 'recorded'
                     ? 'pi 记录的请求成本，非实际账单'
-                    : t.estimated_cost_reason || '按 API 标准短上下文单价估算'
+                    : t.cost_basis === 'free'
+                      ? '账号范围下的免费自动审查，非实际账单'
+                      : t.estimated_cost_reason || '按当前公开 API 列表价估算'
                 }
               >
                 {turnCost(t)}
@@ -559,9 +561,11 @@ function SessionTable({
                     {s.cost_samples}/{s.turns} 轮
                     {s.cost_basis === 'recorded'
                       ? '记录成本'
-                      : s.cost_basis === 'mixed'
-                        ? '记录/估算成本'
-                        : '可估算'}
+                      : s.cost_basis === 'free'
+                        ? '免费'
+                        : s.cost_basis === 'mixed'
+                          ? '记录/估算/免费'
+                          : '可估算'}
                     {s.estimated_cost == null && s.estimated_cost_known != null
                       ? ' · 已知小计'
                       : ''}
@@ -638,7 +642,9 @@ function SessionTable({
                 title={
                   turn.cost_basis === 'recorded'
                     ? 'pi 记录的请求成本，非实际账单'
-                    : turn.estimated_cost_reason || '按 API 标准短上下文单价估算'
+                    : turn.cost_basis === 'free'
+                      ? '账号范围下的免费自动审查，非实际账单'
+                      : turn.estimated_cost_reason || '按当前公开 API 列表价估算'
                 }
               >
                 {turnCost(turn)}

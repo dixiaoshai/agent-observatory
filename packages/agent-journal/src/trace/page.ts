@@ -57,6 +57,7 @@ const REF_KEYS = ['path', 'bytes', 'sha256', 'media_type'];
 const COMMON = ['turn_id', 'root_turn_id', 'model'];
 const KIND_FIELDS: Record<string, string[]> = {
   'session.started': ['cwd', 'parent_session_id', 'forked_from_session_id', 'created_at', 'cli_version', 'title'],
+  'session.auth': ['account_scoped'],
   'session.title': ['title'],
   'turn.context': [], 'turn.started': [], 'turn.completed': [], 'turn.interrupted': [],
   'message.user': ['title'], 'message.assistant': [], 'reasoning.summary': ['available'],
@@ -154,6 +155,10 @@ function validateMetadata(event: PageEvent, rawData: Record<string, unknown>): v
   for (const key of ['available', 'rate_limit_only']) {
     if (key in rawData && typeof rawData[key] !== 'boolean') invalid(`Invalid flag ${key}`);
   }
+  // `session.auth` carries only a boolean sign-in signal: account-scoped is the
+  // whole meaning of the kind, so it must be present and strictly `true`. The
+  // absence of the kind means unknown auth, never a false claim.
+  if (event.kind === 'session.auth' && rawData.account_scoped !== true) invalid('Invalid account_scoped metadata');
   if ('cost_usd' in rawData && rawData.cost_usd !== null
     && (typeof rawData.cost_usd !== 'number' || !Number.isFinite(rawData.cost_usd) || rawData.cost_usd < 0)) {
     invalid('Invalid cost');
@@ -263,9 +268,12 @@ export function validatePage(input: unknown, options: PageValidationOptions): Pa
     // include the native row seq and per-kind identity, which the archive does
     // not retain separately, so consumers validate the hex shape only.
     if (runtime === 'codex') {
-      const tuple: Array<string | number> = 'series' in source
-        ? [runtime, instanceId, sessionId, String(source.series), source.line as number]
-        : [runtime, instanceId, sessionId, source.line as number];
+      const tuple: Array<string | number> = [runtime, instanceId, sessionId];
+      if ('series' in source) tuple.push(String(source.series));
+      tuple.push(source.line as number);
+      // `session.auth` shares its session_meta source line with session.started,
+      // so it appends a kind discriminator after the line to stay distinct.
+      if (kind === 'session.auth') tuple.push('session.auth');
       if (event.event_id !== sha256(JSON.stringify(tuple))) invalid(`${where} has invalid codex event_id`);
     }
     validateMetadata(event as unknown as PageEvent, data);

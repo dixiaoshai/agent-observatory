@@ -120,8 +120,9 @@ python3 -m venv .venv
 
 统计口径：
 
-- 累计快照做差，重复事件不新增用量；模型或用量缺失时不猜测。费用按 `agent_stats/pricing.py` 中当前公开 API Standard 短上下文单价估算（USD），可在总览展开“估算依据与模型单价”查看核对日期、覆盖与假设；它不是实际账单。
+- 累计快照做差，重复事件不新增用量；模型或用量缺失时不猜测。费用按 `agent_stats/pricing.py` 中当前公开 API 列表价估算（USD）：OpenAI 行取 Standard 短上下文价，DeepSeek 行列出 peak 价并按逐请求时间套用 off-peak 半价（中国法定节假日未还原，缺少请求时间时按 peak 上限）。可在总览展开“估算依据与模型单价”查看核对日期、来源、覆盖与假设；它不是实际账单。
 - 有来源记录成本时（如 pi 在请求时记录的 `usage.cost.total`）优先使用记录成本，不按当前价目表重算；没有记录成本的来源按 API 等价单价估算。看板区分两种口径。
+- `codex-auto-review` 没有公开列表价：仅当来源标记会话为账号范围（`account_scoped=true`）且轮次开始时间不早于 `2026-10-06T00:00:00Z` 时按免费规则显示 0（`cost_basis=free`、`cost_source=free_waiver`），其他情况保留未知。该标记来自 Codex `creator_account_id` 的布尔含义，也可能来自 Agent 身份 / PAT，日志无法区分登录方式；缺失表示未知，不按 API Key 处理。
 - `token_total` 仅在当前范围全部轮次有有效值时返回完整合计；`token_known` 是有效轮次的已知小计，无有效样本返回 `null`。父子会话同时在范围内但包含关系不明时，联合金额返回 `null`，各会话独立值仍可查。
 - `observed_token_total` / `observed_token_known` 是各会话轮次观测值的直接相加，未对父子包含关系去重；页面用“会话观测 Token”“各会话观测小计（未去重）”标注，不能视为实际联合用量。缺失仍为 `null`，不补零。
 - 分位数使用 Hyndman-Fan type 7 线性插值，只计算有效轮次，并附有效 / 总样本数；工具字节数不换算 Token 或费用。

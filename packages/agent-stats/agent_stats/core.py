@@ -78,6 +78,11 @@ def _parent_turn_fields(turn, session, sessions_by_id):
     return result
 
 
+def _account_scope(session):
+    """Project verified account-scope evidence onto turns; absence stays unknown."""
+    return {'account_scoped': True} if session.get('account_scoped') is True else {}
+
+
 class Store:
     def __init__(self, path):
         self.path = Path(path).expanduser()
@@ -165,6 +170,7 @@ class Store:
                             and data['title'] == old_data.get('title')
                             and data['project_name'] == old_data.get('project_name')
                             and data.get('usage_accounting') == old_data.get('usage_accounting')
+                            and data.get('account_scoped') == old_data.get('account_scoped')
                             and data.get('forked_from_id') == old_data.get('forked_from_id')):
                         skipped += 1
                         continue
@@ -206,7 +212,7 @@ class Store:
         turns, visible_sessions, visible_accounting = [], [], {}
         legacy_accounting = False
         for s in sessions:
-            subset = [estimate_turn(dict(t, sequence=t.get('sequence') or sequence, session_id=s['id'], session_title=s.get('title'), session_native_id=s.get('native_id'), project=s.get('project'), project_name=s.get('project_name'), source=s['source'], **_parent_turn_fields(t, s, sessions_by_id))) for sequence, t in enumerate(s['turns'], 1) if _matches(t, s, f)]
+            subset = [estimate_turn(dict(t, sequence=t.get('sequence') or sequence, session_id=s['id'], session_title=s.get('title'), session_native_id=s.get('native_id'), project=s.get('project'), project_name=s.get('project_name'), source=s['source'], **_parent_turn_fields(t, s, sessions_by_id), **_account_scope(s))) for sequence, t in enumerate(s['turns'], 1) if _matches(t, s, f)]
             # Empty sessions remain visible when no turn-level filters are applied.
             session_match = all(not f.get(k) or f[k] == s.get(k) for k in ('source', 'project'))
             if not subset and (any(f.get(k) for k in ('start', 'end', 'model')) or not session_match):
@@ -276,7 +282,7 @@ class Store:
             return None
         f = _filters(filters)
         sessions_by_id = {row['id']: row for row in sessions}
-        turns = [estimate_turn(dict(t, sequence=t.get('sequence') or sequence, **_parent_turn_fields(t, s, sessions_by_id))) for sequence, t in enumerate(s['turns'], 1) if _matches(t, s, f)]
+        turns = [estimate_turn(dict(t, sequence=t.get('sequence') or sequence, **_parent_turn_fields(t, s, sessions_by_id), **_account_scope(s))) for sequence, t in enumerate(s['turns'], 1) if _matches(t, s, f)]
         return {'session': {**{k: v for k, v in s.items() if k != 'turns'}, **aggregate_cost(turns),
                             'cache_usage': aggregate_cache(turns)},
                 'turns': turns, 'pricing': PRICING,

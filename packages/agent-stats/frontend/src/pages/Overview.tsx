@@ -143,17 +143,30 @@ export function Overview({
         <summary>估算依据与模型单价 · {data.pricing.checked_at}</summary>
         {data.summary.cost_basis === 'recorded' ? (
           <p>
-            费用来自代理在请求时记录的金额（pi），不是按当前 OpenAI
+            费用来自代理在请求时记录的金额（pi），不是按当前公开 API
             单价重算的估算值，也不是实际账单。
           </p>
+        ) : data.summary.cost_basis === 'free' ? (
+          <p>
+            Codex 记录的账号范围会话中，自动审查请求自 2026-10-06 起按免费 $0 记录；日志无法区分
+            ChatGPT 登录、agent identity 与 PAT。它不是按公开单价估算的金额，也不是实际账单。
+          </p>
         ) : data.summary.cost_basis === 'mixed' ? (
-          <p>费用混合了代理记录成本与按 OpenAI 单价估算的值；合计只作参考，不能当作实际账单。</p>
+          <p>
+            费用混合了代理记录成本、账号范围下的免费自动审查与按当前公开 API
+            单价估算的值；合计只作参考，不能当作实际账单。
+          </p>
         ) : null}
         <p>
           {data.pricing.basis} ·{' '}
-          <a href={data.pricing.source_url} target="_blank" rel="noreferrer">
-            OpenAI 官方价格
-          </a>
+          {data.pricing.sources.map((source, index) => (
+            <span key={source.url}>
+              {index > 0 && ' · '}
+              <a href={source.url} target="_blank" rel="noreferrer">
+                {source.label}
+              </a>
+            </span>
+          ))}
         </p>
         {data.pricing.assumptions.map((text) => (
           <p key={text}>{text}</p>
@@ -171,7 +184,10 @@ export function Overview({
             <tbody>
               {Object.entries(data.pricing.models).map(([model, price]) => (
                 <tr key={model}>
-                  <td>{model}</td>
+                  <td>
+                    {model}
+                    {price.note && <small className="sub">{price.note}</small>}
+                  </td>
                   <td>{formatCost(price.input)}</td>
                   <td>{formatCost(price.cached_input)}</td>
                   <td>{formatCost(price.output)}</td>
@@ -180,7 +196,10 @@ export function Overview({
             </tbody>
           </table>
         </div>
-        <p>单价单位：USD / 百万 Token。</p>
+        <p>
+          单价单位：USD / 百万 Token。OpenAI 行为 Standard 短上下文；DeepSeek 行列出 peak
+          价，off-peak 价按请求时间套用。
+        </p>
       </details>
 
       <div className="bottom-grid">
@@ -271,7 +290,8 @@ export function Overview({
         </article>
       </div>
       <p className="footnote">
-        仅统计当前筛选范围的已知样本。费用可能为来源记录成本或当前 API 等价估算，非实际账单。
+        仅统计当前筛选范围的已知样本。费用可能为来源记录成本、账号范围下的免费自动审查或当前 API
+        等价估算，非实际账单。
         {s.aggregation_blocked && '父子会话观测值未去重，不代表实际联合用量。'}
       </p>
     </div>
@@ -281,6 +301,9 @@ export function Overview({
 function CostSummary({ data }: { data: OverviewData }) {
   const { summary: s } = data;
   const value = s.aggregation_blocked ? s.observed_estimated_cost_known : s.estimated_cost_known;
+  const freeTurns = data.turns.filter(
+    (t) => t.cost_basis === 'free' && knownValue(t.estimated_cost),
+  ).length;
   const rows = data.turns.filter(
     (t) =>
       t.cost_breakdown &&
@@ -309,7 +332,7 @@ function CostSummary({ data }: { data: OverviewData }) {
   const total = parts.reduce((n, p) => n + p.value, 0);
   return (
     <article className="panel summary-card cost-summary">
-      <h3>费用（记录 / API 等价估算）</h3>
+      <h3>费用（记录 / 免费 / API 等价估算）</h3>
       <div className="breakdown-layout">
         <div className="breakdown-amount">
           <strong className="accent" title={formatCost(value)}>
@@ -340,8 +363,9 @@ function CostSummary({ data }: { data: OverviewData }) {
       </div>
       <p className="card-note">
         {s.aggregation_blocked ? '观测小计未去重 · ' : ''}
-        {s.estimated_cost == null && value != null ? '已知小计 · ' : ''}构成覆盖 {rows.length}/
-        {s.turns} 轮；仅按已估算分类拆分。
+        {s.estimated_cost == null && value != null ? '已知小计 · ' : ''}
+        {freeTurns > 0 ? `含免费自动审查 ${freeTurns} 轮 · ` : ''}构成覆盖 {rows.length}/{s.turns}
+        轮；仅按已估算分类拆分。
       </p>
     </article>
   );

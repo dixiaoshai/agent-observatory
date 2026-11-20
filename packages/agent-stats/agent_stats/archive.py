@@ -11,6 +11,7 @@ from .usage import quarantine_request_totals
 _COMMON = {'turn_id', 'root_turn_id', 'model'}
 _FIELDS = {
     'session.started': {'cwd', 'parent_session_id', 'forked_from_session_id', 'created_at', 'cli_version', 'title'},
+    'session.auth': {'account_scoped'},
     'session.title': {'title'},
     'turn.context': set(), 'turn.started': set(), 'turn.completed': set(), 'turn.interrupted': set(),
     'message.user': {'title'}, 'message.assistant': set(), 'reasoning.summary': {'available'},
@@ -85,6 +86,8 @@ def _validate_event(event, after, end):
           or not isinstance(source['path'], str) or not _integer(source['line']) or source['line'] < 1
           or not _id(source['record_hash'])):
         raise ValueError('invalid source reference')
+    if event['kind'] == 'session.auth' and event['runtime'] != 'codex':
+        raise ValueError('session.auth is codex-only')
     # Rollouts folded into a shared session carry their own first identity so
     # two files do not collide on (session, line). The field is optional and is
     # part of the identifier only when present.
@@ -96,7 +99,14 @@ def _validate_event(event, after, end):
         native_identity = [event['runtime'], event['instance_id'], event['session_id']]
         if series is not None:
             native_identity.append(series)
-        native_identity.append('deleted' if event['kind'] == 'session.deleted' else source['line'])
+        if event['kind'] == 'session.deleted':
+            native_identity.append('deleted')
+        elif event['kind'] == 'session.auth':
+            # session.auth shares the session_meta source line with
+            # session.started, so its discriminator follows the line.
+            native_identity.extend([source['line'], 'session.auth'])
+        else:
+            native_identity.append(source['line'])
         native_json = json.dumps(native_identity, ensure_ascii=False, separators=(',', ':'))
         if hashlib.sha256(native_json.encode('utf-8')).hexdigest() != event['event_id']:
             raise ValueError('invalid Codex event ID')
@@ -141,8 +151,15 @@ def _validate_event(event, after, end):
         elif name in ('available', 'rate_limit_only'):
             if value is not None and type(value) is not bool:
                 raise ValueError('invalid boolean')
+        elif name == 'account_scoped':
+            # The producer only emits this event for a verified account scope;
+            # a false or non-boolean flag is not a valid "unknown" encoding.
+            if value is not True:
+                raise ValueError('invalid account scope flag')
         elif value is not None and (not isinstance(value, str) or len(value) > (80 if name == 'title' else 4096)):
             raise ValueError('invalid metadata value: ' + name)
+    if event['kind'] == 'session.auth' and data.get('account_scoped') is not True:
+        raise ValueError('session.auth requires account scope evidence')
     if isinstance(data.get('title'), str) and ('\n' in data['title'] or '\r' in data['title']):
         raise ValueError('title must be one line')
     if event['kind'] == 'tool.returned' and data.get('status') not in (None, 'result_observed'):
@@ -201,10 +218,14 @@ def _rollout_result(events):
     meta = {'id': start['session_id'], 'cwd': data.get('cwd'), 'timestamp': data.get('created_at'),
             'parent_id': data.get('parent_session_id'), 'forked_from_id': data.get('forked_from_session_id'),
             'cli_version': data.get('cli_version'), 'recorded_at': timestamp(start['occurred_at'])}
-    observations = [_observation(e) for e in events if e['kind'] != 'session.deleted']
+    observations = [_observation(e) for e in events if e['kind'] not in ('session.deleted', 'session.auth')]
     result, _ = summarize_events(observations, meta, instance=start['instance_id'], runtime=start['runtime'])
     if not result:
         return None
+    # The account-scope signal belongs to the rollout file it was recorded in.
+    # Only the winning rollout proves it for the session; absence stays unknown.
+    if any(e['kind'] == 'session.auth' and e['data'].get('account_scoped') is True for e in events):
+        result['account_scoped'] = True
     if start['runtime'] in ('pi', 'dsh'):
         # Old producers dropped wholly missing usage and zero-filled cache
         # components. Absence of the new metadata cannot be repaired by reading
@@ -220,7 +241,10 @@ def _rollout_result(events):
             for turn in result['turns']:
                 quarantine_request_totals(turn)
     revision_at = max((e['occurred_at'] for e in events if e['occurred_at']), default='')
-    return (revision_at, len(events)), (result, start)
+    # Rank by source-record count like the direct reader; the additive
+    # session.auth event shares a source line and must not change revision ties.
+    record_count = sum(1 for e in events if e['kind'] != 'session.auth')
+    return (revision_at, record_count), (result, start)
 
 
 def _display_title(events, fallback):

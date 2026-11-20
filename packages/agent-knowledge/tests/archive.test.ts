@@ -198,6 +198,55 @@ test('session.title revisions are accepted metadata evidence', () => {
   store.close();
 });
 
+test('session.auth account-scoped evidence is accepted on its extended codex identity', () => {
+  const store = new ArchiveEvidenceStore(':memory:', 'owner', ['demo']);
+  const session = 'codex-session';
+  const authIdentity = (line: number, series?: string) =>
+    hash(JSON.stringify(['codex', 'local', session, ...(series ? [series] : []), line, 'session.auth']));
+  const sessionMeta = (seq: number, kind: string, data: Record<string, unknown>, series?: string) => ({
+    schema_version: 1, event_id: '', archive_seq: seq,
+    runtime: 'codex', instance_id: 'local', session_id: session, session_key: JSON.stringify(['codex', 'local', session]),
+    project_id: 'demo', kind, occurred_at: '2026-01-01T00:00:00Z', observed_at: '2026-01-01T00:00:00Z',
+    native_type: 'session_meta',
+    source: { path: '/gone/session.jsonl', line: 7, record_hash: hash('session-meta'), ...(series ? { series } : {}) },
+    data: { turn_id: null, root_turn_id: null, model: null, ...data }, body: null, raw: null,
+  });
+  // session.auth shares the authoritative session_meta line with session.started.
+  const started = { ...sessionMeta(1, 'session.started', { cwd: '/demo' }), event_id: hash(JSON.stringify(['codex', 'local', session, 7])) };
+  const auth = { ...sessionMeta(2, 'session.auth', { account_scoped: true }), event_id: authIdentity(7) };
+  assert.equal(store.importBatch(batch(0, 2, [started, auth])).imported, 2);
+  const evidence = store.read('archive-a', auth.event_id).event;
+  assert.equal(evidence.kind, 'session.auth');
+  assert.deepEqual(evidence.data, { turn_id: null, root_turn_id: null, model: null, account_scoped: true });
+  // A sub-agent rollout keeps source.series in its session.auth identity.
+  const seriesAuth = {
+    ...sessionMeta(3, 'session.auth', { account_scoped: true }, 'child-rollout'),
+    event_id: authIdentity(7, 'child-rollout'),
+  };
+  assert.equal(store.importBatch(batch(2, 3, [seriesAuth])).imported, 1);
+  store.close();
+
+  const rejected = [
+    // Old line-only identity, and a series rollout hashed without source.series.
+    { ...sessionMeta(1, 'session.auth', { account_scoped: true }), event_id: hash(JSON.stringify(['codex', 'local', session, 7])) },
+    { ...sessionMeta(1, 'session.auth', { account_scoped: true }, 'child-rollout'), event_id: authIdentity(7) },
+    // account_scoped is the whole meaning of the kind: it must be strictly true.
+    { ...sessionMeta(1, 'session.auth', { account_scoped: false }), event_id: authIdentity(7) },
+    { ...sessionMeta(1, 'session.auth', { account_scoped: 'true' }), event_id: authIdentity(7) },
+    { ...sessionMeta(1, 'session.auth', {}), event_id: authIdentity(7) },
+    // The discriminator applies to session.auth only; other kinds keep the old identity.
+    { ...sessionMeta(1, 'session.title', { title: 'ok' }), event_id: hash(JSON.stringify(['codex', 'local', session, 7, 'session.title'])) },
+  ];
+  for (const candidate of rejected) {
+    const fresh = new ArchiveEvidenceStore(':memory:', 'owner', ['demo']);
+    try {
+      assert.throws(() => fresh.importBatch(batch(0, 1, [candidate])),
+        (error: AgentKnowledgeError) => error.code === 'INVALID_ARCHIVE');
+      assert.equal(fresh.committedCursor('archive-a'), 0);
+    } finally { fresh.close(); }
+  }
+});
+
 test('request usage metadata is validated atomically', () => {
   const usage = (runtime: string, data: Record<string, unknown>) => ({
     ...event(2, 'unused'), runtime, session_key: JSON.stringify([runtime, 'local', 'session']),

@@ -145,6 +145,61 @@ class SessionNameTests(unittest.TestCase):
         self.assertEqual(self.store.query()['summary']['token_total'], 30)
         self.assertEqual(self.store.import_paths([self.source])['skipped'], 1)
 
+    def test_creator_account_id_marks_scope_without_persisting_the_id(self):
+        def rollout(identity, creator):
+            events = [
+                {'type': 'session_meta', 'payload': {'id': identity, 'cwd': '/synthetic',
+                                                     'creator_account_id': creator}},
+                {'type': 'turn_context', 'payload': {'turn_id': 'turn-a', 'model': 'codex-auto-review'}},
+                {'type': 'event_msg', 'payload': {'type': 'token_count', 'info': {
+                    'total_token_usage': {'input_tokens': 100, 'output_tokens': 20, 'total_tokens': 120}}}},
+            ]
+            for index, row in enumerate(events, 1):
+                row['timestamp'] = '2026-11-20T00:00:0%dZ' % index
+            return events
+
+        self.source.write_text(''.join(json.dumps(row) + '\n'
+                                       for row in rollout('session-scoped', 'acct_PRIVATE_SENTINEL')),
+                               encoding='utf-8')
+        self.store.import_paths([self.source])
+        result = self.store.query()
+        scoped = next(t for t in result['turns'] if t['session_native_id'] == 'session-scoped')
+        self.assertIs(scoped['account_scoped'], True)
+        self.assertEqual(scoped['estimated_cost'], 0)
+        self.assertEqual(scoped['cost_basis'], 'free')
+        self.assertEqual(scoped['cost_source'], 'free_waiver')
+        session = next(s for s in result['sessions'] if s['native_id'] == 'session-scoped')
+        self.assertIs(self.store.detail(session['id'])['session']['account_scoped'], True)
+        # The raw account identity is never persisted, only its boolean meaning.
+        self.assertNotIn(b'acct_PRIVATE_SENTINEL', self.store.path.read_bytes())
+        self.assertEqual(self.store.import_paths([self.source])['skipped'], 1)
+        # An older projection without the signal is upgraded even though usage
+        # and the rest of the metadata are unchanged.
+        key, body = self.store.db.execute('SELECT key,body FROM sessions').fetchone()
+        legacy = json.loads(body)
+        del legacy['account_scoped']
+        self.store.db.execute('UPDATE sessions SET body=? WHERE key=?', (json.dumps(legacy), key))
+        self.store.db.commit()
+        self.assertEqual(self.store.import_paths([self.source])['imported'], 1)
+        restored = next(t for t in self.store.query()['turns']
+                        if t['session_native_id'] == 'session-scoped')
+        self.assertIs(restored['account_scoped'], True)
+
+        # A missing or empty creator_account_id stays unknown, never "API key".
+        for label, creator in (('empty', ''), ('blank', '   '), ('missing', None)):
+            with self.subTest(label=label):
+                rows = rollout('session-' + label, creator)
+                if creator is None:
+                    del rows[0]['payload']['creator_account_id']
+                path = self.source.parent / ('%s.jsonl' % label)
+                path.write_text(''.join(json.dumps(row) + '\n' for row in rows), encoding='utf-8')
+                self.store.import_paths([path])
+                turn = next(t for t in self.store.query()['turns']
+                            if t['session_native_id'] == 'session-' + label)
+                self.assertNotIn('account_scoped', turn)
+                self.assertIsNone(turn['estimated_cost'])
+                self.assertIsNone(turn['cost_basis'])
+
     def test_project_root_precedence_and_explicit_thread_assignment(self):
         db = self.state()
         db.execute('ALTER TABLE threads ADD COLUMN project_id TEXT')
