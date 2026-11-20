@@ -33,6 +33,7 @@ test('events query uses fixed defaults, bounds and canonical values', () => {
   assert.deepEqual(parseEventsQuery(''), { after: 0, limit: DEFAULT_PAGE_EVENTS, view: 'metadata' });
   assert.deepEqual(parseEventsQuery('after=12&limit=3&view=content'), { after: 12, limit: 3, view: 'content' });
   assert.deepEqual(parseEventsQuery('view=metadata'), { after: 0, limit: DEFAULT_PAGE_EVENTS, view: 'metadata' });
+  assert.deepEqual(parseEventsQuery('revisions=1'), { after: 0, limit: DEFAULT_PAGE_EVENTS, view: 'metadata', revisions: true });
   assert.deepEqual(parseEventsQuery(`limit=${MAX_PAGE_EVENTS}`), { after: 0, limit: MAX_PAGE_EVENTS, view: 'metadata' });
   for (const query of ['after=-1', 'after=1.5', 'after=01', 'after=abc', 'after=9007199254740992']) {
     assert.equal(codeOf(() => parseEventsQuery(query)).code, 'INVALID_CURSOR', query);
@@ -40,7 +41,7 @@ test('events query uses fixed defaults, bounds and canonical values', () => {
   for (const query of ['after=', 'limit=0', `limit=${MAX_PAGE_EVENTS + 1}`, 'limit=01', 'limit=1.5', 'limit=', `limit=${'9'.repeat(20)}`]) {
     assert.equal(codeOf(() => parseEventsQuery(query)).code, 'INVALID_INPUT', query);
   }
-  for (const query of ['view=all', 'view=', 'project_id=demo', 'after=1&after=2', 'limit=1&limit=2', 'view=metadata&view=content', 'foo=1']) {
+  for (const query of ['view=all', 'view=', 'project_id=demo', 'after=1&after=2', 'limit=1&limit=2', 'view=metadata&view=content', 'revisions=0', 'revisions=', 'revisions=1&revisions=1', 'foo=1']) {
     assert.equal(codeOf(() => parseEventsQuery(query)).code, 'INVALID_INPUT', query);
   }
   assert.equal(codeOf(() => parseEventsQuery('x=' + 'a'.repeat(MAX_QUERY_CHARS))).code, 'QUERY_TOO_LARGE');
@@ -115,6 +116,7 @@ test('status envelope exposes identity, watermark and collection health without 
   assert.deepEqual(status.archive, { archive_id: 'archive-uuid', capture_mode: 'metadata', high_watermark: 42 });
   assert.equal(status.protocol.default_page_events, DEFAULT_PAGE_EVENTS);
   assert.equal(status.protocol.max_page_events, MAX_PAGE_EVENTS);
+  assert.equal(status.protocol.event_removals, true);
   assert.deepEqual(status.protocol.views, ['metadata', 'content']);
   assert.equal(status.collection.state, 'idle');
   assert.equal(status.collection.last_scan!.unmatched_projects, 1);

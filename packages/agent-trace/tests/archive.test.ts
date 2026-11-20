@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { Archive, sourceFiles } from '../src/store.ts';
 import { hash } from '../src/types.ts';
@@ -91,6 +92,84 @@ test('malformed lines are atomic while in-place rewrites replace changed records
   assert.throws(() => archive.importFile(fixture, 'local', 'other-project'), /another project/);
 });
 
+test('revision feed paginates removals before replacements without changing legacy batches', t => {
+  const { filename, archive } = setup(t, 'metadata');
+  const full = readFileSync(filename, 'utf8');
+  archive.importFile(filename, 'local', 'demo');
+  const before = archive.exportBatch(0, 100, 'metadata', true);
+  assert.deepEqual(before.removed_events, []);
+  const original = before.events.find(event => event.kind === 'turn.completed')!;
+  writeFileSync(filename, full.replace('task_complete', 'turn_aborted') + '{"type":"future","payload":{}}\n');
+  archive.importFile(filename, 'local', 'demo');
+  const first = archive.exportBatch(before.next_cursor, 1, 'metadata', true);
+  assert.deepEqual(first.events, []);
+  assert.deepEqual(first.removed_events, [{ archive_seq: before.next_cursor + 1, removed_seq: original.archive_seq }]);
+  assert.equal(first.next_cursor, before.next_cursor + 1);
+  assert.equal(first.has_more, true);
+  const second = archive.exportBatch(first.next_cursor, 1, 'metadata', true);
+  assert.deepEqual(second.removed_events, []);
+  assert.equal(second.events.length, 1);
+  assert.equal(second.events[0]!.archive_seq, first.next_cursor + 1);
+  assert.equal(second.events[0]!.event_id, original.event_id);
+  const legacy = archive.exportBatch(before.next_cursor, 100);
+  assert.ok(!('removed_events' in legacy));
+  assert.equal(legacy.events.length, 2);
+  assert.equal(legacy.next_cursor, archive.highWatermark());
+});
+
+test('failed revision rolls back marker, original event and sequence reservation', t => {
+  const { filename, archive } = setup(t, 'metadata');
+  const full = readFileSync(filename, 'utf8');
+  archive.importFile(filename, 'local', 'demo');
+  const before = archive.exportBatch(0, 100, 'metadata', true);
+  archive.db.exec("CREATE TRIGGER fail_revision BEFORE INSERT ON events BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END");
+  writeFileSync(filename, full.replace('task_complete', 'turn_aborted'));
+  assert.throws(() => archive.importFile(filename, 'local', 'demo'), /synthetic failure/);
+  assert.deepEqual(archive.exportBatch(0, 100, 'metadata', true), before);
+  assert.equal(archive.highWatermark(), before.next_cursor);
+});
+
+test('already-open old SQL writer produces transactional removal markers', t => {
+  const { filename, db, archive } = setup(t, 'metadata');
+  archive.importFile(filename, 'local', 'demo');
+  archive.db.exec('DROP TRIGGER events_removed');
+  const oldWriter = new DatabaseSync(db);
+  t.after(() => oldWriter.close());
+  const upgraded = new Archive(db, 'metadata');
+  upgraded.close();
+  const before = archive.exportBatch(0, 100, 'metadata', true);
+  const removed = before.events[0]!;
+  oldWriter.exec('BEGIN');
+  oldWriter.prepare('DELETE FROM events WHERE seq=?').run(removed.archive_seq);
+  oldWriter.exec('ROLLBACK');
+  assert.deepEqual(archive.exportBatch(0, 100, 'metadata', true), before);
+  oldWriter.prepare('DELETE FROM events WHERE seq=?').run(removed.archive_seq);
+  const page = archive.exportBatch(before.next_cursor, 100, 'metadata', true);
+  assert.deepEqual(page.removed_events, [{ archive_seq: before.next_cursor + 1, removed_seq: removed.archive_seq }]);
+  assert.equal(page.next_cursor, before.next_cursor + 1);
+  assert.ok(!('removed_events' in archive.exportBatch(before.next_cursor)));
+});
+
+test('moved changed revisions replace all rows but identical copies are no-ops', t => {
+  const { dir, filename, archive } = setup(t, 'metadata');
+  const full = readFileSync(filename, 'utf8');
+  archive.importFile(filename, 'local', 'demo');
+  const before = archive.exportBatch(0, 100, 'metadata', true);
+  const moved = path.join(dir, 'moved.jsonl');
+  writeFileSync(moved, full);
+  assert.equal(archive.importFile(moved, 'local', 'demo').imported, 0);
+  assert.deepEqual(archive.exportBatch(0, 100, 'metadata', true), before);
+  writeFileSync(moved, full.replace('task_complete', 'turn_aborted') + '{"type":"future","payload":{}}\n');
+  const result = archive.importFile(moved, 'local', 'demo');
+  assert.equal(result.imported, 12);
+  assert.equal(result.skipped, 0);
+  const after = archive.exportBatch(before.next_cursor, 100, 'metadata', true);
+  assert.equal(after.removed_events!.length, 11);
+  assert.ok(after.events.every(event => event.source!.path === moved));
+  assert.ok(after.events.some(event => event.kind === 'session.started'));
+  assert.ok(after.events.some(event => event.kind === 'turn.interrupted'));
+});
+
 test('pagination, durable cursor, independent archive identities and deletion feed', t => {
   const { filename, archive } = setup(t);
   archive.importFile(filename, 'local', 'demo');
@@ -102,6 +181,7 @@ test('pagination, durable cursor, independent archive identities and deletion fe
   assert.equal(archive.deleteSession('codex', 'local', 'archive-demo-session').deleted, true);
   const deleted = archive.exportBatch(second.next_cursor);
   assert.equal(deleted.events.length, 1); assert.equal(deleted.events[0]!.kind, 'session.deleted');
+  assert.deepEqual(archive.exportBatch(second.next_cursor, 100, 'metadata', true).removed_events, []);
   assert.equal(archive.highWatermark(), 12); assert.equal(archive.status().high_watermark, 12);
   assert.equal(deleted.events[0]!.source, null);
   assert.equal(archive.readEvent(evidence, 'content'), null);

@@ -67,6 +67,7 @@ test('serve scans new logs and exposes the authenticated read-only API', async t
     return response.status === 200 && response.json?.archive?.high_watermark === 11 ? response : null;
   });
   assert.equal(statusResponse.json.schema_version, 1);
+  assert.equal(statusResponse.json.protocol.event_removals, true);
   assert.equal(statusResponse.json.archive.archive_id, service.archive.archiveId);
   assert.equal(statusResponse.json.archive.capture_mode, 'content');
   assert.equal(statusResponse.json.collection.enabled, true);
@@ -84,6 +85,11 @@ test('serve scans new logs and exposes the authenticated read-only API', async t
   assert.equal(metadata.json.next_cursor, 11);
   assert.equal(metadata.json.has_more, false);
   assert.equal(metadata.json.events.length, 11);
+  assert.ok(!('removed_events' in metadata.json));
+  const revisions = await request(port, '/v1/events?after=0&limit=100&revisions=1', { token: STATS_TOKEN });
+  assert.equal(revisions.status, 200);
+  assert.deepEqual(revisions.json.removed_events, []);
+  assert.deepEqual(revisions.json.events, metadata.json.events);
   assert.ok(metadata.json.events.every((event: any) => event.body === null && event.raw === null));
   assert.doesNotMatch(metadata.body, /SYNTHETIC_PRIVATE|SYNTHETIC_FUTURE/);
   const empty = await request(port, '/v1/events?after=11&limit=100&view=metadata', { token: STATS_TOKEN });

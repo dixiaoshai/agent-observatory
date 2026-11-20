@@ -37,10 +37,11 @@ Accept: application/json
 | `after` | 否 | `0` | 非负安全整数，规范写法为 `0` 或无前导零的十进制；缺省从 0 开始 |
 | `limit` | 否 | `500` | 整数 `1..1000`；不接受前导零、空值、重复参数 |
 | `view` | 否 | `metadata` | `metadata` 或 `content`；必须在该客户端授权视图内 |
+| `revisions` | 否 | 不启用 | 声明 `protocol.event_removals` 的服务接受 `1`，在批次中附带事件移除标记 |
 
 不接受其它参数（包括 `project_id`）。未知、重复、空值或越界参数返回明确错误，不静默取默认值。查询串超过 4096 字符返回 414。
 
-响应体就是现有 v1 `Batch`，不增加字段：
+未请求 `revisions=1` 时，响应为原有 v1 `Batch`：
 
 ```json
 {
@@ -54,13 +55,14 @@ Accept: application/json
 }
 ```
 
-- 服务端唯一批次生成逻辑是现有 `Archive.exportBatch`；HTTP 与 CLI `export` 的事件顺序、事件身份、视图投影和游标语义一致。
+- 默认 HTTP 分页与 CLI `export` 使用相同的事件顺序、身份、视图投影和游标语义。
+- `revisions=1` 时，批次额外包含 `removed_events`（无移除时为 `[]`）。`limit` 约束事件和标记的合计条数，`next_cursor` 可以落在标记上。详见[事件修订语义](protocol.md)。
 - `metadata` 响应始终 `body=null`、`raw=null`；`content` 只返回建库时已捕获的内容，未捕获仍为 `null`。
 - content 模式对常见凭据和敏感字段脱敏；超大字符串以 `content_ref`（绝对路径、`bytes`、`sha256`）返回，不截断。客户端必须校验引用后再读取，不能把引用当作普通正文。
 - `GET` 幂等，不推进服务端或消费方进度。相同范围可重试，没有“确认收货”副作用。
 - `has_more=true` 时消费方立即用 `next_cursor` 续取；追平后按自身空闲间隔轮询。
 - 空页可因删除标记或已有事件被删而跨过序号；`archive_seq` 允许空洞。
-- 单页最多 1000 事件，序列化后上限 32 MiB。若超限，请求以 413 `PAGE_TOO_LARGE` 失败且不返回半页；消费方应减小 `page_size` / `limit` 后重试同一游标。
+- 单页最多 1000 条（事件和启用时的移除标记合计），序列化后上限 32 MiB。若超限，请求以 413 `PAGE_TOO_LARGE` 失败且不返回半页；消费方应减小 `page_size` / `limit` 后重试同一游标。
 - 归档内所有项目共用一条序列。客户端必须被授权读取页内全部项目；Knowledge 遇到未授权项目整页拒绝。当前没有按项目过滤的流；窄范围使用独立归档。
 - 游标超出归档历史或归档身份变化时返回错误，不返回空页伪装“已追平”。消费方不得自动把游标归零。
 
@@ -76,6 +78,7 @@ Accept: application/json
     "default_page_events": 500,
     "max_page_events": 1000,
     "max_page_bytes": 33554432,
+    "event_removals": true,
     "views": ["metadata", "content"]
   },
   "archive": {

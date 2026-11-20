@@ -97,7 +97,7 @@ export class LocalApiServer {
       if (url.pathname === '/v1/events') {
         const query = parseEventsQuery(url.search.slice(1));
         authorizeView(client, query.view);
-        const batch = this.options.archive.exportBatch(query.after, query.limit, query.view);
+        const batch = this.options.archive.exportBatch(query.after, query.limit, query.view, query.revisions === true);
         const body = serialize(batch);
         if (Buffer.byteLength(body) > this.maxPageBytes) {
           throw new ApiError(413, 'PAGE_TOO_LARGE', `Serialized page exceeds ${this.maxPageBytes} bytes; retry with a smaller limit`);

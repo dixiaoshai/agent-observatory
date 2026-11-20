@@ -58,7 +58,8 @@ CREATE TABLE IF NOT EXISTS follow_state (
   last_error_class TEXT,
   last_error_at TEXT,
   lease_owner TEXT,
-  lease_expires_at REAL
+  lease_expires_at REAL,
+  event_removals INTEGER
 )
 """
 
@@ -244,8 +245,11 @@ class TraceClient:
         data = self._get('/v1/status')
         return validate_status(data, self.page_size)
 
-    def events(self, after, limit):
-        return self._get('/v1/events', {'after': str(after), 'limit': str(limit), 'view': VIEW})
+    def events(self, after, limit, revisions=False):
+        query = {'after': str(after), 'limit': str(limit), 'view': VIEW}
+        if revisions:
+            query['revisions'] = '1'
+        return self._get('/v1/events', query)
 
     def _get(self, path, query=None):
         url = self.base_url + path
@@ -320,11 +324,16 @@ def validate_status(data, page_size):
                           % (page_size, max_events))
     if not isinstance(archive, dict) or not isinstance(archive.get('archive_id'), str) or not archive['archive_id']:
         raise FollowError('PROTOCOL', 'permanent', 'status response does not report an archive_id')
-    return {'archive_id': archive['archive_id'], 'max_page_events': max_events}
+    if 'event_removals' in protocol and type(protocol['event_removals']) is not bool:
+        raise FollowError('PROTOCOL', 'permanent', 'invalid event_removals capability')
+    return {'archive_id': archive['archive_id'], 'max_page_events': max_events,
+            'event_removals': protocol.get('event_removals') is True}
 
 
-def validate_page(batch, after, page_size, archive_id):
+def validate_page(batch, after, page_size, archive_id, revisions=False):
     keys = {'schema_version', 'archive_id', 'view', 'after_cursor', 'next_cursor', 'has_more', 'events'}
+    if revisions:
+        keys.add('removed_events')
     if not isinstance(batch, dict) or set(batch) != keys:
         raise FollowError('INVALID_PAGE', 'permanent', 'page envelope is not a v1 batch')
     if batch['schema_version'] != 1 or batch['view'] != VIEW:
@@ -340,8 +349,9 @@ def validate_page(batch, after, page_size, archive_id):
         raise FollowError('INVALID_PAGE', 'permanent', 'page cursor does not advance')
     if type(batch['has_more']) is not bool or not isinstance(batch['events'], list):
         raise FollowError('INVALID_PAGE', 'permanent', 'page envelope has an invalid type')
-    if len(batch['events']) > page_size:
-        raise FollowError('INVALID_PAGE', 'permanent', 'page returned more events than requested')
+    markers = batch.get('removed_events', [])
+    if not isinstance(markers, list) or len(batch['events']) + len(markers) > page_size:
+        raise FollowError('INVALID_PAGE', 'permanent', 'page returned invalid or too many entries')
     if batch['has_more'] and batch['next_cursor'] == after:
         raise FollowError('INVALID_PAGE', 'permanent', 'page claims more data without advancing')
     for event in batch['events']:
@@ -362,6 +372,8 @@ def follow_id(database, view=VIEW):
 
 def _ensure_state(db, identifier, trace_url):
     db.execute(_STATE_DDL)
+    if 'event_removals' not in {row[1] for row in db.execute('PRAGMA table_info(follow_state)')}:
+        db.execute('ALTER TABLE follow_state ADD COLUMN event_removals INTEGER')
     db.execute('CREATE TABLE IF NOT EXISTS archive_cursors (archive_id TEXT PRIMARY KEY, cursor INTEGER NOT NULL)')
     now = _at()
     db.execute('INSERT OR IGNORE INTO follow_state (follow_id,trace_url,view,created_at,updated_at) VALUES(?,?,?,?,?)',
@@ -477,6 +489,7 @@ class FollowWorker:
         self.follow_id = follow_id(config.database)
         self.owner = _owner()
         self.archive_id = None
+        self.revisions = False
         self.cursor = 0
         self.failures = 0
         self.needs_probe = True
@@ -572,8 +585,11 @@ class FollowWorker:
     def _cycle(self):
         if self.needs_probe:
             self._probe()
-        page = self.client.events(self.cursor, self.config.page_size)
-        validate_page(page, self.cursor, self.config.page_size, self.archive_id)
+        if self.revisions:
+            page = self.client.events(self.cursor, self.config.page_size, revisions=True)
+        else:
+            page = self.client.events(self.cursor, self.config.page_size)
+        validate_page(page, self.cursor, self.config.page_size, self.archive_id, self.revisions)
         self._touch_attempt()
         result = import_batch(self.store, page, self.config.allowed_project_ids or None)
         self.cursor = result['cursor']
@@ -590,23 +606,36 @@ class FollowWorker:
         if self.archive_id and archive_id != self.archive_id:
             raise FollowError('ARCHIVE_CHANGED', 'permanent',
                               'stored archive_id differs from the Trace response')
-        if not self.archive_id:
-            self._bind(archive_id)
+        self._bind(archive_id, status.get('event_removals') is True)
         self.needs_probe = False
         self.cursor = self._read_cursor()
         self._record_trace_url()
 
-    def _bind(self, archive_id):
+    def _bind(self, archive_id, revisions=False):
         now = _at()
         self.db.execute('BEGIN IMMEDIATE')
         try:
-            self.db.execute('UPDATE follow_state SET archive_id=?, updated_at=? WHERE follow_id=?',
-                            (archive_id, now, self.follow_id))
+            row = _state_row(self.db, self.follow_id)
+            if row['archive_id'] and row['archive_id'] != archive_id:
+                raise FollowError('ARCHIVE_CHANGED', 'permanent',
+                                  'stored archive_id differs from the Trace response')
+            pinned = row['event_removals'] == 1
+            cursor_row = self.db.execute('SELECT cursor FROM archive_cursors WHERE archive_id=?',
+                                         (archive_id,)).fetchone()
+            cursor = cursor_row[0] if cursor_row else 0
+            if pinned and not revisions:
+                raise FollowError('PROTOCOL', 'permanent', 'Trace no longer advertises event removals')
+            if revisions and not pinned and cursor > 0:
+                raise FollowError('REBUILD_REQUIRED', 'permanent',
+                                  'existing projection predates event removal history; rebuild in a new database')
+            self.db.execute('UPDATE follow_state SET archive_id=?, event_removals=?, updated_at=? WHERE follow_id=?',
+                            (archive_id, 1 if revisions else None, now, self.follow_id))
             self.db.commit()
         except Exception:
             self.db.rollback()
             raise
         self.archive_id = archive_id
+        self.revisions = revisions
 
     def _read_cursor(self):
         if not self.archive_id:

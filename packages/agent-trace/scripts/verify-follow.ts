@@ -234,12 +234,34 @@ try {
   assert.equal(ids.size, evidence.length, 'duplicate evidence after restart');
 
   await stop('knowledge');
+
+  // Rewrite a consumed usage event in place and omit an entire tool call.
+  // Keep a newer last timestamp so the shorter source wins revision ranking.
+  const rewritten = readFileSync(source, 'utf8')
+    .split('\n').filter(line => !line.includes('SYNTHETIC_PRIVATE')).join('\n')
+    .replaceAll('"output_tokens":40', '"output_tokens":70')
+    .replaceAll('"total_tokens":140', '"total_tokens":170');
+  writeFileSync(source, rewritten + EXTRA_EVENT.replace('00:00:11Z', '00:00:12Z'));
+  ingest();
+  const rewriteWatermark = (await status()).archive.high_watermark;
+  assert.ok(rewriteWatermark > 15);
+  start('stats', 'python3', ['-m', 'agent_stats', 'follow', '--config', statsFollowConfig], statsDir,
+    { TRACE_STATS_TOKEN: STATS_TOKEN });
+  await waitFor('Stats applies replacements and removes old tool calls', () => {
+    if (statsCursor() !== rewriteWatermark) return false;
+    const summary = stats('summary').summary;
+    return summary.sessions === 1 && summary.token_total === 170 && summary.tool_calls === 0;
+  });
+  const afterRewrite = stats('summary').summary;
+  await stop('stats');
+
   await stop('trace');
   process.stdout.write(`${JSON.stringify({
     passed: true,
     synthetic_only: true,
-    trace_high_watermark: 15,
-    stats: { sessions: afterRestart.sessions, turns: afterRestart.turns, tokens: afterRestart.token_total, tools: afterRestart.tool_calls },
+    trace_high_watermark: rewriteWatermark,
+    stats_rewrites_converge: true,
+    stats: { sessions: afterRewrite.sessions, turns: afterRewrite.turns, tokens: afterRewrite.token_total, tools: afterRewrite.tool_calls },
     knowledge_appended_events: evidence.length,
     independent_stop_and_resume: true,
     terminal_cursor: statsCursor(),

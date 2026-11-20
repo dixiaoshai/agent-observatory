@@ -2,6 +2,7 @@
 import hashlib
 import json
 import math
+import sqlite3
 from datetime import datetime, timezone
 
 from .codex import FIELDS, summarize_events, timestamp, usage_total
@@ -256,6 +257,7 @@ def _rebuild(db, archive_id, session_key):
         if candidate is not None and (chosen is None or candidate[0] > chosen[0]):
             chosen = candidate
     if chosen is None:
+        db.execute('DELETE FROM sessions WHERE key=?', (session_key,))
         return
     result, start = chosen[1]
     result['native_id'], result['id'] = result['id'], session_key
@@ -283,6 +285,8 @@ def import_batch(store, batch, allowed_project_ids=None):
     so replaying a filtered page stays idempotent.
     """
     keys = {'schema_version', 'archive_id', 'view', 'after_cursor', 'next_cursor', 'has_more', 'events'}
+    if isinstance(batch, dict) and 'removed_events' in batch:
+        keys.add('removed_events')
     if (not isinstance(batch, dict) or set(batch) != keys or batch['schema_version'] != 1
             or batch['view'] != 'metadata' or not isinstance(batch['archive_id'], str) or not batch['archive_id']
             or not _integer(batch['after_cursor']) or not _integer(batch['next_cursor'])
@@ -298,6 +302,23 @@ def import_batch(store, batch, allowed_project_ids=None):
         if event['archive_seq'] <= previous:
             raise ValueError('events must be ordered')
         previous = event['archive_seq']
+    markers = batch.get('removed_events', [])
+    if not isinstance(markers, list):
+        raise ValueError('invalid removal markers')
+    previous = after
+    targets = set()
+    event_seqs = {event['archive_seq'] for event in batch['events']}
+    for marker in markers:
+        if (not isinstance(marker, dict) or set(marker) != {'archive_seq', 'removed_seq'}
+                or not _integer(marker['archive_seq']) or not _integer(marker['removed_seq'])
+                or not 0 < marker['removed_seq'] < marker['archive_seq']
+                or not previous < marker['archive_seq'] <= end
+                or marker['archive_seq'] in event_seqs or marker['removed_seq'] in targets):
+            raise ValueError('invalid removal marker')
+        previous = marker['archive_seq']
+        targets.add(marker['removed_seq'])
+    if targets.intersection(marker['archive_seq'] for marker in markers):
+        raise ValueError('removal target is a marker sequence')
     if batch['has_more'] and end == after:
         raise ValueError('non-advancing page')
     scope = _project_scope(allowed_project_ids)
@@ -310,6 +331,13 @@ def import_batch(store, batch, allowed_project_ids=None):
         db.execute('CREATE TABLE IF NOT EXISTS archive_pages (archive_id TEXT NOT NULL, after_cursor INTEGER NOT NULL, next_cursor INTEGER NOT NULL, fingerprint TEXT NOT NULL, PRIMARY KEY(archive_id,after_cursor,next_cursor))')
         db.execute('CREATE TABLE IF NOT EXISTS archive_deleted (archive_id TEXT NOT NULL, session_key TEXT NOT NULL, PRIMARY KEY(archive_id,session_key))')
         db.execute('CREATE TABLE IF NOT EXISTS archive_sessions (session_key TEXT PRIMARY KEY, archive_id TEXT NOT NULL, project_id TEXT NOT NULL)')
+        # Offline imports share this cursor and must not bypass a follower's
+        # durable revision negotiation by advancing with a legacy page.
+        state_columns = {row[1] for row in db.execute('PRAGMA table_info(follow_state)')}
+        if ('event_removals' in state_columns and 'removed_events' not in batch
+                and db.execute('SELECT 1 FROM follow_state WHERE archive_id=? AND event_removals=1',
+                               (archive_id,)).fetchone()):
+            raise ValueError('revision-enabled archive requires removal markers')
         row = db.execute('SELECT cursor FROM archive_cursors WHERE archive_id=?', (archive_id,)).fetchone()
         cursor = row[0] if row else 0
         if after != cursor:
@@ -320,7 +348,17 @@ def import_batch(store, batch, allowed_project_ids=None):
             raise ValueError('archive cursor gap, overlapping page or conflicting replay')
         affected = set()
         imported = 0
-        for event in batch['events']:
+        entries = [(event['archive_seq'], False, event) for event in batch['events']]
+        entries += [(marker['archive_seq'], True, marker) for marker in markers]
+        for _, is_marker, event in sorted(entries, key=lambda item: item[0]):
+            if is_marker:
+                row = db.execute('SELECT session_key FROM archive_events WHERE archive_id=? AND seq=?',
+                                 (archive_id, event['removed_seq'])).fetchone()
+                if row:
+                    db.execute('DELETE FROM archive_events WHERE archive_id=? AND seq=?',
+                               (archive_id, event['removed_seq']))
+                    affected.add(row[0])
+                continue
             key = event['session_key']
             if scope is not None and event['project_id'] not in scope:
                 # Out-of-scope data belongs to another consumer's scope; skipping it
@@ -345,7 +383,7 @@ def import_batch(store, batch, allowed_project_ids=None):
             try:
                 db.execute('INSERT INTO archive_events VALUES(?,?,?,?,?)',
                            (archive_id, event['archive_seq'], event['event_id'], key, _canonical(event)))
-            except Exception as exc:
+            except sqlite3.IntegrityError as exc:
                 raise ValueError('conflicting archive event identity or sequence') from exc
             affected.add(key)
         for key in affected:

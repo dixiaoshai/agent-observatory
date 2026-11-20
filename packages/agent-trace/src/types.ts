@@ -49,6 +49,8 @@ export interface Batch {
   next_cursor: number;
   has_more: boolean;
   events: Event[];
+  /** Present only when the revision-aware feed is requested. */
+  removed_events?: { archive_seq: number; removed_seq: number }[];
 }
 export class ArchiveError extends Error {
   code: string;

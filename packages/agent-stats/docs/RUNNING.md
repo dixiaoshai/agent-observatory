@@ -54,6 +54,7 @@ python3 -m agent_stats --db .agent-stats/stats.sqlite3 serve --archive-only
 
 - 配置是严格 JSON，相对路径相对配置文件。未知键、非回环地址、带路径或凭据的 URL、越界页大小、`max_backoff_seconds < idle_seconds` 都会拒绝启动；`--db` 可显式覆盖配置中的目标数据库（相对当前目录）。
 - 固定 `metadata` 视图：启动先请求 `/v1/status` 校验协议版本、服务端页上限与 `archive_id`，再按自身已提交游标请求 `/v1/events`。每页与游标在同一个本地事务提交，空页但游标前移同样提交；重放同一页按页指纹保持幂等。
+- 新版 Trace 宣告 `protocol.event_removals` 后，Stats 请求 `revisions=1`，同步会话改写中替换或移除的事件。旧 Trace 仍可同步追加和整会话删除，但不会完整传播改写。若已有旧版消费游标，升级时 follow 报 `REBUILD_REQUIRED`，不重置旧库；历史改写没有移除标记，不能继续使用旧投影。升级两端后，保留现有库，使用原配置和项目范围以 `follow --config PATH --db NEW_DB` 回放到一个新的空库，核对汇总后再让看板和 follow 都使用新库。已在新版模式消费的库不能切回旧 Trace。
 - 同一目标库同一视图只允许一个 worker。租约 30 秒，等待期间每 10 秒续租；第二个实例以 `FOLLOW_LOCKED` 退出（退出码 1）。持有者崩溃后，租约过期或同机进程确认消失即可接管，接管从数据库游标继续。
 - 临时错误（连接拒绝 / 超时 / 5xx / 本地库 busy）从 `idle_seconds` 起指数退避，封顶 `max_backoff_seconds`；`429` 带 `Retry-After` 时取其与上限的较小值。永久错误（401、视图未授权、非法参数 / 游标、页过大、非法信封、`archive_id` 变化、身份冲突）停止该目标并以退出码 2 报告，不自动归零。
 - stdout 为逐行 NDJSON（`follow.started` / `follow.page` / `follow.idle` / `follow.error` / `follow.state` / `follow.stopped`），不输出 token、正文或原始事件；stderr 输出单行错误 JSON。`Ctrl+C` / SIGTERM 不再取新页，等待当前事务结束并释放租约后以 0 退出。

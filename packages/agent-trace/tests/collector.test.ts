@@ -207,14 +207,14 @@ test('partial tails wait, malformed lines roll back, and rewrites replace the ne
   assert.equal(rewrite.errors, 0);
   assert.equal(rewrite.imported, 1);
   assert.equal(rewrite.skipped, 10);
-  assert.equal(archive.highWatermark(), 12);
+  assert.equal(archive.highWatermark(), 13);
   assert.ok(archive.exportBatch(0, 100, 'metadata').events.some(event => event.kind === 'turn.interrupted'));
   writeFileSync(fixture.file, full);
   const restored = await collector.scanOnce();
   assert.equal(restored.errors, 0);
   assert.equal(restored.imported, 1);
   assert.equal(restored.skipped, 10);
-  assert.equal(archive.highWatermark(), 13);
+  assert.equal(archive.highWatermark(), 15);
 
   const missingSession = path.join(fixture.logs, 'no-meta.jsonl');
   writeFileSync(missingSession, '{"type":"event_msg","payload":{"type":"task_started"}}\n');
@@ -265,9 +265,10 @@ test('moved and copied files deduplicate while one failing source does not stop 
   renameSync(fixture.file, moved);
   appendExtraEvent(moved);
   const movedReport = await collector.scanOnce();
-  assert.equal(movedReport.imported, 1);
-  assert.equal(movedReport.skipped, 11);
-  assert.equal(archive.highWatermark(), 12);
+  assert.equal(movedReport.imported, 12);
+  assert.equal(movedReport.skipped, 0);
+  assert.equal(archive.highWatermark(), 34);
+  assert.equal(archive.exportBatch(11, 100, 'metadata', true).removed_events!.length, 11);
 });
 
 test('oversized source files are reported without blocking valid files', async t => {

@@ -55,7 +55,11 @@
 
 对 Codex v1 适配器，`event_id = SHA256(JSON.stringify([runtime, instance_id, session_id, one_based_line_number]))`。复制 / 移动保持身份。两**不同**行上的相同内容不会去重。可用时保留原生 ID 与解析器版本；未来的适配器可以使用原生 ID 代替序号位置。事件身份不得依赖归一化版本。未知记录保持为 `source.unknown`，在捕获时保留原始原生类型和原始负载。
 
-一个会话身份可能由多个 rollout 文件覆盖，Codex 也可能原地重写某个 rollout。归档对每个会话只保留一个 revision：取最后事件时间最大的文件，再取记录数最多的文件。更新的 revision 替换旧 revision；相同 revision 原地协调（变化的记录被替换，相同记录保留 `event_id` 与序列位置）；更旧的 revision 直接跳过而不回滚。已有会话的项目变更仍以 `SOURCE_CONFLICT` 失败；无论哪种情况，消费方看到的都是游标单调递增的普通事件。
+一个会话身份可能由多个 rollout 文件覆盖，Codex 也可能原地重写某个 rollout。归档对每个会话只保留一个 revision：取最后事件时间最大的文件，再取记录数最多的文件。更新的 revision 替换旧 revision；相同 revision 原地协调（同一路径中变化的记录被替换，未变化的记录保留 `event_id` 与序列位置；从另一路径读到有变化的获胜 revision 时整体替换，使会话头与用量保持同一来源，相同副本仍不重复导入）；更旧的 revision 直接跳过而不回滚。已有会话的项目变更仍以 `SOURCE_CONFLICT` 失败。旧版分页只返回当前还存在的普通事件，不传播 revision 移除；需要同步这些变化的客户端必须显式协商下述扩展。
+
+当 `/v1/status` 的 `protocol.event_removals` 为 `true` 时，客户端可以对 `/v1/events` 请求 `revisions=1`。响应额外包含 `removed_events` 数组（无移除时为空），条目只有 `archive_seq`（变更序号）和 `removed_seq`（此前分配的旧事件序号）。两数组各自按 `archive_seq` 升序，条目共享同一游标和分页上限。移除与替换在归档事务内提交，移除标记的序号先于替换事件；消费方按序删除自己已持久化的旧事件并重建受影响投影，每页与游标原子提交；修订跨页时，投影在追平前可能暂不完整。若旧序号不在消费方库中（例如全量回放、项目过滤），移除是空操作。标记不保存旧事件的内容或身份；整会话删除仍通过 `session.deleted` 传播。未请求 `revisions=1` 时，响应不带此数组。
+
+升级不会为旧归档中已经发生的重写补造移除标记；从旧版分页切换到此扩展的消费方需要以当前归档从游标 0 回放到新投影，再继续增量消费。
 
 一个 Codex rollout 可能包含多条 `session_meta`：恢复会话会追加新身份，子代理 rollout 会在自身身份之后重复父身份。最后一条记录是权威记录；整个文件按该 `session_id` 和项目归档，更早的身份标记不会发出。这与直接日志读取器的归属一致，也把 token 保留在一个会话中。会话 `title` 是从来源 `session_index.jsonl` / 最新的可读 `state_*.sqlite` 读取的可选显示元数据；它从不改变事件身份、隐私保证或游标语义。
 

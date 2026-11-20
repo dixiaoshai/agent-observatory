@@ -44,6 +44,53 @@ class ArchiveTests(unittest.TestCase):
             record(7, 'turn.completed', {'turn_id': 'turn'}),
         ]
 
+    def test_revision_replacement_removal_scope_and_replay(self):
+        import_batch(self.store, page(0, 7, self.rows), allowed_project_ids=('demo',))
+        replacement = dict(self.rows[3])
+        replacement['archive_seq'] = 9
+        replacement['data'] = {'turn_id': 'turn', 'cumulative': {'total_tokens': 50},
+                               'last_usage': {'total_tokens': 50}}
+        revised = page(7, 9, [replacement])
+        revised['removed_events'] = [{'archive_seq': 8, 'removed_seq': 4}]
+        import_batch(self.store, revised, allowed_project_ids=('demo',))
+        self.assertEqual(self.store.query()['summary']['token_total'], 50)
+        self.assertTrue(import_batch(self.store, revised, allowed_project_ids=('demo',))['replayed'])
+        removal = page(9, 11, [])
+        removal['removed_events'] = [{'archive_seq': 10, 'removed_seq': 9},
+                                     {'archive_seq': 11, 'removed_seq': 1}]
+        import_batch(self.store, removal, allowed_project_ids=('demo',))
+        self.assertEqual(self.store.query()['summary']['sessions'], 0)
+        missing = page(11, 12, [])
+        missing['removed_events'] = [{'archive_seq': 12, 'removed_seq': 8 + 3}]
+        import_batch(self.store, missing, allowed_project_ids=('demo',))
+        self.assertEqual(self.store.db.execute('SELECT cursor FROM archive_cursors').fetchone()[0], 12)
+
+    def test_removal_of_out_of_scope_row_is_a_noop(self):
+        outside = record(1, 'session.started', {'cwd': '/other'}, 'outside', project='other')
+        import_batch(self.store, page(0, 1, [outside]), allowed_project_ids=('demo',))
+        removal = page(1, 2, [])
+        removal['removed_events'] = [{'archive_seq': 2, 'removed_seq': 1}]
+        import_batch(self.store, removal, allowed_project_ids=('demo',))
+        self.assertEqual(self.store.db.execute('SELECT COUNT(*) FROM archive_events').fetchone()[0], 0)
+        self.assertEqual(self.store.db.execute('SELECT cursor FROM archive_cursors').fetchone()[0], 2)
+
+    def test_invalid_markers_and_conflict_roll_back(self):
+        import_batch(self.store, page(0, 7, self.rows))
+        for markers in ([{'archive_seq': 8, 'removed_seq': 8}],
+                        [{'archive_seq': 8, 'removed_seq': True}],
+                        [{'archive_seq': 8, 'removed_seq': 1}, {'archive_seq': 9, 'removed_seq': 1}],
+                        [{'archive_seq': 9, 'removed_seq': 1}, {'archive_seq': 8, 'removed_seq': 2}]):
+            bad = page(7, 9, [])
+            bad['removed_events'] = markers
+            with self.assertRaises(ValueError):
+                import_batch(self.store, bad)
+        bad = page(7, 9, [dict(self.rows[2], archive_seq=9)])
+        bad['removed_events'] = [{'archive_seq': 8, 'removed_seq': 4}]
+        with self.assertRaises(ValueError):
+            import_batch(self.store, bad)
+        self.assertEqual(self.store.query()['summary']['token_total'], 120)
+        self.assertEqual(self.store.db.execute('SELECT cursor FROM archive_cursors').fetchone()[0], 7)
+
     def test_usage_matches_direct_source_and_replay(self):
         source = self.root / 'rollout.jsonl'
         native = [

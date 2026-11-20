@@ -236,6 +236,99 @@ class FollowTests(unittest.TestCase):
         return store.db.execute('SELECT * FROM follow_state').fetchone()
 
 
+class RevisionFollowTests(FollowTests):
+    def test_revision_negotiation_restart_downgrade_and_missing_markers(self):
+        class Client:
+            supported = True
+            include_markers = True
+            requests = []
+
+            def status(self):
+                return {'archive_id': 'archive-1', 'event_removals': self.supported}
+
+            def events(self, after, limit, revisions=False):
+                self.requests.append(revisions)
+                result = {'schema_version': 1, 'archive_id': 'archive-1', 'view': 'metadata',
+                          'after_cursor': after, 'next_cursor': after, 'has_more': False, 'events': []}
+                if self.include_markers:
+                    result['removed_events'] = []
+                return result
+
+        trace = self.trace()
+        config = self.config(trace)
+        worker, store, _ = self.worker(config)
+        worker.client = Client()
+        self.assertTrue(worker._start())
+        worker._cycle()
+        self.assertEqual(worker.client.requests, [True])
+        from agent_stats.archive import import_batch
+        legacy = {'schema_version': 1, 'archive_id': 'archive-1', 'view': 'metadata',
+                  'after_cursor': 0, 'next_cursor': 1, 'has_more': False, 'events': []}
+        with self.assertRaises(ValueError):
+            import_batch(store, legacy)
+        self.assertEqual(store.db.execute('SELECT cursor FROM archive_cursors').fetchone()[0], 0)
+        worker.client.include_markers = False
+        with self.assertRaises(FollowError):
+            worker._cycle()
+        from agent_stats.follow import release_lease
+        release_lease(store.db, worker.follow_id, worker.owner)
+        restarted, _, _ = self.worker(config, store=store)
+        restarted.client = Client()
+        restarted.client.supported = False
+        self.assertTrue(restarted._start())
+        with self.assertRaises(FollowError) as caught:
+            restarted._probe()
+        self.assertEqual(caught.exception.code, 'PROTOCOL')
+        release_lease(store.db, restarted.follow_id, restarted.owner)
+
+    def test_import_before_binding_is_checked_in_transaction(self):
+        from agent_stats.archive import import_batch
+        from agent_stats.follow import release_lease
+
+        class Client:
+            def status(self):
+                return {'archive_id': 'archive-1', 'event_removals': True}
+
+        trace = self.trace()
+        worker, store, _ = self.worker(self.config(trace))
+        self.assertTrue(worker._start())
+        worker.client = Client()
+        bind = worker._bind
+
+        def import_then_bind(archive_id, revisions=False):
+            batch = {'schema_version': 1, 'archive_id': archive_id, 'view': 'metadata',
+                     'after_cursor': 0, 'next_cursor': 1, 'has_more': False, 'events': []}
+            import_batch(store, batch)
+            return bind(archive_id, revisions)
+
+        worker._bind = import_then_bind
+        with self.assertRaises(FollowError) as caught:
+            worker._probe()
+        self.assertEqual(caught.exception.code, 'REBUILD_REQUIRED')
+        self.assertEqual(store.db.execute('SELECT archive_id, event_removals FROM follow_state').fetchone(),
+                         (None, None))
+        release_lease(store.db, worker.follow_id, worker.owner)
+
+    def test_upgrade_existing_cursor_requires_rebuild_without_binding(self):
+        class Client:
+            def status(self):
+                return {'archive_id': 'archive-1', 'event_removals': True}
+        trace = self.trace()
+        config = self.config(trace)
+        worker, store, _ = self.worker(config)
+        self.assertTrue(worker._start())
+        store.db.execute('INSERT INTO archive_cursors VALUES (?,?)', ('archive-1', 7))
+        store.db.commit()
+        worker.client = Client()
+        with self.assertRaises(FollowError) as caught:
+            worker._probe()
+        self.assertEqual(caught.exception.code, 'REBUILD_REQUIRED')
+        self.assertEqual(store.db.execute('SELECT archive_id, event_removals FROM follow_state').fetchone(),
+                         (None, None))
+        from agent_stats.follow import release_lease
+        release_lease(store.db, worker.follow_id, worker.owner)
+
+
 class ConfigTests(FollowTests):
     def test_defaults_and_relative_path(self):
         trace = self.trace()

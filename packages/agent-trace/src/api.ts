@@ -59,6 +59,7 @@ export interface ApiStatus {
     default_page_events: number;
     max_page_events: number;
     max_page_bytes: number;
+    event_removals: true;
     views: View[];
   };
   archive: { archive_id: string; capture_mode: View; high_watermark: number };
@@ -69,6 +70,7 @@ export interface EventsQuery {
   after: number;
   limit: number;
   view: View;
+  revisions?: true;
 }
 
 export interface RequestHeaders {
@@ -158,7 +160,7 @@ export function parseEventsQuery(rawQuery: string): EventsQuery {
   for (const [key, value] of params) {
     if (seen.has(key)) throw new ApiError(400, 'INVALID_INPUT', `Query parameter "${key}" must not be repeated`);
     seen.add(key);
-    if (!['after', 'limit', 'view'].includes(key)) throw new ApiError(400, 'INVALID_INPUT', `Unsupported query parameter "${key}"`);
+    if (!['after', 'limit', 'view', 'revisions'].includes(key)) throw new ApiError(400, 'INVALID_INPUT', `Unsupported query parameter "${key}"`);
     if (!value) throw new ApiError(400, 'INVALID_INPUT', `Query parameter "${key}" must not be empty`);
   }
   const afterText = params.get('after') ?? '0';
@@ -171,7 +173,9 @@ export function parseEventsQuery(rawQuery: string): EventsQuery {
   if (!Number.isSafeInteger(limit) || limit > MAX_PAGE_EVENTS) throw new ApiError(400, 'INVALID_INPUT', `limit must be 1..${MAX_PAGE_EVENTS}`);
   const view = params.get('view') ?? 'metadata';
   if (view !== 'metadata' && view !== 'content') throw new ApiError(400, 'INVALID_INPUT', 'view must be metadata or content');
-  return { after, limit, view };
+  const revisions = params.get('revisions');
+  if (revisions !== null && revisions !== '1') throw new ApiError(400, 'INVALID_INPUT', 'revisions must be 1');
+  return revisions === '1' ? { after, limit, view, revisions: true } : { after, limit, view };
 }
 
 /** `/v1/status` takes no query parameters; reject filters instead of implying scoped status. */
@@ -236,6 +240,7 @@ export function buildApiStatus(
       default_page_events: DEFAULT_PAGE_EVENTS,
       max_page_events: MAX_PAGE_EVENTS,
       max_page_bytes: MAX_PAGE_BYTES,
+      event_removals: true,
       views: [...VIEWS],
     },
     archive: {

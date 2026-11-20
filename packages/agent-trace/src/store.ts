@@ -74,6 +74,16 @@ export class Archive {
           session_key TEXT NOT NULL REFERENCES sessions(session_key), record_hash TEXT NOT NULL, payload TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS events_session ON events(session_key);
+        CREATE TABLE IF NOT EXISTS removed_events (
+          seq INTEGER PRIMARY KEY, removed_seq INTEGER NOT NULL
+        );
+        CREATE TRIGGER IF NOT EXISTS events_removed AFTER DELETE ON events
+        WHEN COALESCE((SELECT deleted FROM sessions WHERE session_key=OLD.session_key), 0)=0
+        BEGIN
+          UPDATE sqlite_sequence SET seq=seq+1 WHERE name='events';
+          INSERT INTO removed_events(seq,removed_seq)
+            SELECT seq,OLD.seq FROM sqlite_sequence WHERE name='events';
+        END;
         CREATE TABLE IF NOT EXISTS session_revisions (
           session_key TEXT PRIMARY KEY, revision_at TEXT NOT NULL, event_count INTEGER NOT NULL,
           source_path TEXT NOT NULL, updated_at TEXT NOT NULL
@@ -214,7 +224,7 @@ export class Archive {
       const session = this.db.prepare('SELECT project_id,deleted FROM sessions WHERE session_key=?').get(first.session_key);
       if (session?.deleted) throw new ArchiveError('SESSION_DELETED', 'Deleted session cannot be silently reimported');
       if (session && session.project_id !== projectId) throw new ArchiveError('SOURCE_CONFLICT', 'Existing session belongs to another project');
-      const stored = this.db.prepare('SELECT revision_at,event_count FROM session_revisions WHERE session_key=?')
+      const stored = this.db.prepare('SELECT revision_at,event_count,source_path FROM session_revisions WHERE session_key=?')
         .get(first.session_key);
       const current = stored
         ? { revision_at: String(stored.revision_at), event_count: Number(stored.event_count) }
@@ -239,6 +249,14 @@ export class Archive {
       );
       const incoming = new Map(events.map(event => [event.event_id, event]));
       const remove = this.db.prepare('DELETE FROM events WHERE event_id=?');
+      const changed = existing.size !== incoming.size || [...existing].some(([id, prior]) =>
+        incoming.get(id)?.source?.record_hash !== prior.record_hash);
+      // Identical copies are a no-op and retain the original source path. A
+      // changed revision from another path must replace even unchanged rows so
+      // its header and usage remain associated with the same source.
+      const priorPath = stored ? String(stored.source_path)
+        : existing.size ? (JSON.parse(existing.values().next().value!.payload) as Event).source?.path : undefined;
+      const replaceAll = changed && priorPath !== undefined && priorPath !== absolutePath;
       const add = this.db.prepare('INSERT INTO events(event_id,session_key,record_hash,payload) VALUES(?,?,?,?)');
       let imported = 0;
       let skipped = 0;
@@ -247,14 +265,14 @@ export class Archive {
       // otherwise unchanged lines keep their identity and sequence position.
       for (const [eventId, prior] of existing) {
         const next = incoming.get(eventId);
-        if (!next || next.source!.record_hash !== prior.record_hash) {
+        if (replaceAll || !next || next.source!.record_hash !== prior.record_hash) {
           remove.run(eventId);
           removedBlobs.push(...referencedBlobs(prior.payload));
         }
       }
       for (const event of events) {
         const prior = existing.get(event.event_id);
-        if (prior !== undefined && prior.record_hash === event.source!.record_hash) { skipped++; continue; }
+        if (!replaceAll && prior !== undefined && prior.record_hash === event.source!.record_hash) { skipped++; continue; }
         add.run(event.event_id, event.session_key, event.source!.record_hash, JSON.stringify(event));
         imported++;
       }
@@ -262,7 +280,7 @@ export class Archive {
         VALUES(?,?,?,?,?)
         ON CONFLICT(session_key) DO UPDATE SET revision_at=excluded.revision_at, event_count=excluded.event_count,
           source_path=excluded.source_path, updated_at=excluded.updated_at`)
-        .run(first.session_key, rank.revision_at, rank.event_count, absolutePath, new Date().toISOString());
+        .run(first.session_key, rank.revision_at, rank.event_count, !changed && priorPath ? priorPath : absolutePath, new Date().toISOString());
       this.db.exec('COMMIT');
       // A reconciled rewrite can reuse a blob path for identical redacted
       // content; never delete a file the just-committed events still cite.
@@ -333,20 +351,28 @@ export class Archive {
   highWatermark(): number {
     return Number(this.db.prepare("SELECT seq FROM sqlite_sequence WHERE name='events'").get()?.seq ?? 0);
   }
-  exportBatch(after = 0, limit = 500, view: View = 'metadata'): Batch {
+  exportBatch(after = 0, limit = 500, view: View = 'metadata', revisions = false): Batch {
     cursorOf(after); viewOf(view);
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 10000) throw new ArchiveError('INVALID_INPUT', 'limit must be 1..10000');
     this.db.exec('BEGIN');
     try {
       const high = this.highWatermark();
       if (after > high) throw new ArchiveError('INVALID_CURSOR', 'Cursor is beyond archive history');
-      const rows = this.db.prepare('SELECT seq,payload FROM events WHERE seq>? AND seq<=? ORDER BY seq LIMIT ?').all(after, high, limit + 1);
+      const rows = revisions
+        ? this.db.prepare(`SELECT seq,payload,NULL AS removed_seq FROM events WHERE seq>? AND seq<=?
+            UNION ALL SELECT seq,NULL AS payload,removed_seq FROM removed_events WHERE seq>? AND seq<=?
+            ORDER BY seq LIMIT ?`).all(after, high, after, high, limit + 1)
+        : this.db.prepare('SELECT seq,payload,NULL AS removed_seq FROM events WHERE seq>? AND seq<=? ORDER BY seq LIMIT ?').all(after, high, limit + 1);
       const hasMore = rows.length > limit;
       const selected = rows.slice(0, limit);
-      const events = selected.map(row => this.present(String(row.payload), Number(row.seq), view));
-      const next = hasMore ? events.at(-1)!.archive_seq : high;
+      const events = selected.filter(row => row.removed_seq === null).map(row => this.present(String(row.payload), Number(row.seq), view));
+      const next = hasMore ? Number(selected.at(-1)!.seq) : high;
+      const removedEvents = selected.filter(row => row.removed_seq !== null)
+        .map(row => ({ archive_seq: Number(row.seq), removed_seq: Number(row.removed_seq) }));
       this.db.exec('COMMIT');
-      return { schema_version: 1, archive_id: this.archiveId, view, after_cursor: after, next_cursor: next, has_more: hasMore, events };
+      const batch: Batch = { schema_version: 1, archive_id: this.archiveId, view, after_cursor: after, next_cursor: next, has_more: hasMore, events };
+      if (revisions) batch.removed_events = removedEvents;
+      return batch;
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
   private present(payload: string, seq: number, view: View): Event {
@@ -368,8 +394,8 @@ export class Archive {
       if (!session || session.deleted) { this.db.exec('COMMIT'); return { deleted: false }; }
       const payloads = this.db.prepare('SELECT payload FROM events WHERE session_key=?').all(key)
         .map(row => String(row.payload));
-      this.db.prepare('DELETE FROM events WHERE session_key=?').run(key);
       this.db.prepare('UPDATE sessions SET deleted=1 WHERE session_key=?').run(key);
+      this.db.prepare('DELETE FROM events WHERE session_key=?').run(key);
       const now = new Date().toISOString();
       const event: Event = {
         schema_version: 1, event_id: hash(JSON.stringify([runtime, instanceId, sessionId, 'deleted'])), archive_seq: 0,
