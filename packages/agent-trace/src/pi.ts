@@ -19,8 +19,8 @@
  * id. Forked/cloned sessions copy the source entries verbatim; the header's
  * `timestamp` and `parentSession` let consumers skip inherited history, exactly
  * like Codex forks. Usage is reported per request, so the adapter also emits a
- * running cumulative snapshot: consumers that only know cumulative accounting
- * can still derive the same per-request delta.
+ * running cumulative snapshot for compatibility. Missing request fields cannot
+ * be recovered from that sum.
  */
 import type { SourceRecord } from './codex.ts';
 import {
@@ -49,7 +49,7 @@ function mapUsage(value: unknown): Usage | null {
   const reasoning = integer(src.reasoning);
   const total = integer(src.totalTokens);
   const fields: JsonObject = {};
-  if (input !== null) fields.input_tokens = input + (cacheRead ?? 0);
+  if (input !== null && cacheRead !== null) fields.input_tokens = input + cacheRead;
   if (cacheRead !== null) fields.cached_input_tokens = cacheRead;
   if (cacheWrite !== null) fields.cache_write_input_tokens = cacheWrite;
   if (output !== null) fields.output_tokens = output;
@@ -58,11 +58,11 @@ function mapUsage(value: unknown): Usage | null {
   else if (typeof fields.input_tokens === 'number' && typeof fields.output_tokens === 'number') {
     fields.total_tokens = fields.input_tokens + fields.output_tokens;
   }
-  if (!Object.keys(fields).length) return null;
   const cost = object(src.cost);
   const totalCost = cost && typeof cost.total === 'number' && Number.isFinite(cost.total) && cost.total >= 0
     ? cost.total
     : null;
+  if (!Object.keys(fields).length && totalCost === null) return null;
   return {
     fields,
     cost: totalCost === null ? null : {
@@ -228,10 +228,16 @@ export function normalize(
     for (const [key, value] of Object.entries(usage.fields)) {
       if (typeof value === 'number') cumulative[key] = (cumulative[key] ?? 0) + value;
     }
+    const rawId = record.row.id;
+    const requestId = typeof rawId === 'string' && rawId.length > 0 && rawId.length <= 4096
+      && rawId === rawId.trim() && !/[\x00-\x1f\x7f]/.test(rawId) ? rawId : null;
     add(record, 'usage.snapshot', '', {
       ...common(activeTurn, model),
       cumulative: { ...cumulative },
       last_usage: { ...usage.fields },
+      usage_basis: 'request',
+      request_id: requestId,
+      request_id_source: nativeType === 'message.assistant' && requestId !== null ? 'pi_entry' : 'source_record',
       rate_limit_only: false,
       ...(usage.cost ?? {}),
     }, null, nativeType);
@@ -285,8 +291,8 @@ export function normalize(
         const assistantModel = typeof message.model === 'string' && message.model ? message.model : model;
         model = assistantModel;
         add(record, 'message.assistant', '', common(activeTurn, assistantModel), { text: text(message.content) }, 'message.assistant');
-        const usage = mapUsage(message.usage);
-        if (usage) addUsage(record, usage, 'message.assistant');
+        const usage = mapUsage(message.usage) ?? { fields: {}, cost: null };
+        addUsage(record, usage, 'message.assistant');
         if (Array.isArray(message.content)) {
           for (const part of message.content) {
             const block = object(part);

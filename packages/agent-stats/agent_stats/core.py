@@ -9,15 +9,17 @@ from pathlib import Path
 from .codex import parse_rollout, timestamp
 from .codex_metadata import metadata_home, project_name, read_project_metadata, read_session_titles
 from .pricing import PRICING, aggregate_cost, estimate_turn
-from .usage import aggregate_cache
+from .usage import aggregate_cache, quarantine_request_totals
 
 SCHEMA_VERSION = 1
 
 
 def _sum_known(turns):
     vals = [t['token_total'] for t in turns if t.get('token_total') is not None]
+    subtotals = [t.get('token_known', t.get('token_total')) for t in turns]
+    known = [v for v in subtotals if v is not None]
     return (sum(vals) if len(vals) == len(turns) and turns else None,
-            sum(vals) if vals else None, len(vals))
+            sum(known) if known else None, len(vals))
 
 
 def percentile(values, p):
@@ -185,6 +187,13 @@ class Store:
                         or not isinstance(data.get('turns'), list)
                         or any(not isinstance(t, dict) or not isinstance(t.get('tools'), list) or 'token_total' not in t for t in data['turns'])):
                     raise ValueError()
+                if (data.get('source') in ('pi', 'dsh') and data.get('source_path')
+                        and data.get('usage_projection_version') != 2):
+                    # Query-time quarantine, not an automatic database migration.
+                    # Old projections have already discarded per-record presence.
+                    warnings.append('旧 pi/dsh 用量投影缺少逐调用事实，仅保留观测小计；请在新归档和新消费者库重建。')
+                    for turn in data['turns']:
+                        quarantine_request_totals(turn)
                 sessions.append(data)
             except (ValueError, TypeError):
                 warnings.append('数据库中有损坏的规范化会话，已跳过')
@@ -218,7 +227,7 @@ class Store:
             prefix = s.get('source_path', '')
             warnings.extend((prefix + ': ' if prefix else '') + w for w in s.get('warnings', []))
         ids = {s['id'] for s in visible_sessions}
-        blocked = legacy_accounting or any(s.get('parent_id') in ids and
+        blocked = legacy_accounting or any(t.get('usage_attribution_uncertain') for t in turns) or any(s.get('parent_id') in ids and
                       (visible_accounting[s['id']] != 'per_session' or
                        visible_accounting[s['parent_id']] != 'per_session')
                       for s in visible_sessions)

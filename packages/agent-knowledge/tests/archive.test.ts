@@ -198,6 +198,45 @@ test('session.title revisions are accepted metadata evidence', () => {
   store.close();
 });
 
+test('request usage metadata is validated atomically', () => {
+  const usage = (runtime: string, data: Record<string, unknown>) => ({
+    ...event(2, 'unused'), runtime, session_key: JSON.stringify([runtime, 'local', 'session']),
+    kind: 'usage.snapshot', body: null, raw: null,
+    data: { turn_id: null, root_turn_id: null, model: null, ...data },
+  });
+  const good = { usage_basis: 'request', request_id: 'entry', request_id_source: 'pi_entry' };
+  const valid = [usage('pi', good), usage('pi', { ...good, request_id: null, request_id_source: 'source_record' }),
+    usage('pi', { ...good, request_id: 'a'.repeat(4096), request_id_source: 'source_record' }),
+    usage('pi', { ...good, request_id: '\u0085entry' }), usage('pi', { ...good, request_id: 'entry\u0085' }),
+    usage('dsh', { ...good, request_id_source: 'dsh_record' }), usage('pi', {})];
+  for (const candidate of valid) {
+    const store = new ArchiveEvidenceStore(':memory:', 'owner', ['demo']);
+    try { assert.equal(store.importBatch(batch(0, 2, [candidate])).imported, 1); }
+    finally { store.close(); }
+  }
+  const bad = [usage('pi', { ...good, usage_basis: 'session' }), usage('pi', { ...good, usage_basis: null }),
+    usage('pi', { ...good, request_id_source: 'unknown' }), usage('pi', { ...good, request_id_source: 1 }),
+    usage('pi', { ...good, request_id: '' }), usage('pi', { ...good, request_id: 'a'.repeat(4097) }),
+    usage('pi', { ...good, request_id: ' entry ' }), usage('pi', { ...good, request_id: 'x\u007f' }),
+    usage('pi', { ...good, request_id: '😀'.repeat(2049) }),
+    usage('pi', { ...good, request_id: '\ufeffentry' }), usage('pi', { ...good, request_id: 'entry\ufeff' }),
+    usage('pi', { ...good, request_id: 1 }), usage('pi', { ...good, request_id: null }),
+    usage('dsh', { ...good, request_id_source: 'dsh_record', request_id: null }),
+    usage('dsh', good), usage('pi', { ...good, request_id_source: 'dsh_record' }),
+    usage('dsh', { ...good, request_id_source: 'source_record' }), usage('codex', good), usage('other', good),
+    usage('pi', { usage_basis: 'request' }), usage('pi', { request_id: 'entry', request_id_source: 'pi_entry' }),
+    usage('pi', { usage_basis: 'request', request_id: 'entry' })];
+  for (const candidate of bad) {
+    const store = new ArchiveEvidenceStore(':memory:', 'owner', ['demo']);
+    try {
+      assert.throws(() => store.importBatch(batch(0, 2, [event(1, 'must not persist'), candidate])),
+        (error: AgentKnowledgeError) => error.code === 'INVALID_ARCHIVE');
+      assert.equal(store.committedCursor('archive-a'), 0);
+      assert.equal(store.search('must not persist').length, 0);
+    } finally { store.close(); }
+  }
+});
+
 test('externalized content references are accepted, verifiable and still scoped', () => {
   const ref = { content_ref: { path: '/private/blobs/abc.txt', bytes: 1234, sha256: hash('external body'), media_type: 'text/plain' } };
   const returned = { ...event(1, 'ignored'), kind: 'tool.returned', native_type: 'response_item.function_call_output',

@@ -16,6 +16,9 @@ def digest(value):
 def record(seq, kind, data=None, sid='pi-session', runtime='pi', occurred=None, line=None):
     line = line or seq
     key = json.dumps([runtime, 'local', sid], separators=(',', ':'))
+    if kind == 'usage.snapshot':
+        data = {**(data or {}), 'usage_basis': 'request', 'request_id': str(line),
+                'request_id_source': 'pi_entry' if runtime == 'pi' else 'dsh_record'}
     return {
         'schema_version': 1, 'event_id': digest([runtime, sid, kind, line]),
         'archive_seq': seq, 'runtime': runtime, 'instance_id': 'local', 'session_id': sid,

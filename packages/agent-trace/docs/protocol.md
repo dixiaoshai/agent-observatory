@@ -154,7 +154,7 @@ All ordinary events include nullable `turn_id`, `root_turn_id`, and `model`.
 | `reasoning.summary` | `available` boolean | `text` if visible |
 | `tool.called` | `call_id`, `name`, `input_bytes` | `arguments` (native structured value or string) |
 | `tool.returned` | `call_id`, `output_bytes`, `status: result_observed` | `output` |
-| `usage.snapshot` | `cumulative`, `last_usage`, `rate_limit_only`, optional `cost_usd` (nonnegative number) and `cost_source` (`provider` or `model_rates`) | null |
+| `usage.snapshot` | `cumulative`, `last_usage`, `rate_limit_only`, optional `usage_basis`, `request_id`, `request_id_source`, `cost_usd` (nonnegative number) and `cost_source` (`provider` or `model_rates`) | null |
 | `context.compacted` | no additional fields | optional summary |
 | `source.unknown` | no additional fields | null; original in `raw` |
 | `session.deleted` | no additional fields | null |
@@ -185,13 +185,48 @@ Usage objects allow ONLY nonnegative integer `input_tokens`, `cached_input_token
 `cache_write_input_tokens`, `output_tokens`, `reasoning_output_tokens`,
 `total_tokens`. Absent fields are unknown, NOT zero. Input may include cached input;
 output may include reasoning output; never sum every field. `usage.snapshot`
-explicitly denotes cumulative source accounting, not a billable new request.
+normally carries cumulative accounting, not proof of a billable new request.
 `cost_usd` is the recorded cost of the same request described by `last_usage`
 (not of the cumulative snapshot). `cost_source=provider` means the provider
 reported the charge; `model_rates` means the harness computed it from its own
 model rate table. Consumers must not present the two as account bills, and an
 absent field means unknown, NOT zero. Consumers retain cumulative reset/missing
 evidence and fork inheritance warnings.
+
+Pi and dsh snapshots add `usage_basis: "request"`, meaning `last_usage` is
+an observed per-call fact, not a native cumulative reading. `request_id` is a
+nonempty string or null; `request_id_source` is `pi_entry`, `dsh_record`, or
+`source_record`. These three fields must be all present or all absent; the
+extension is allowed only for pi/dsh. IDs must equal their ECMAScript
+`String.trim()` result, exclude C0/DEL control characters, and be at most 4096
+UTF-16 code units. In particular U+0085 is not trim whitespace, but U+FEFF is;
+Python consumers must not substitute Python's default `strip()` definition. `pi_entry` identifies a pi assistant entry by its
+native entry id; `source_record` identifies other pi records or an assistant
+lacking a usable id (null). Only `source_record` may have a null identity.
+`dsh_record` identifies a log record via `seq-<seq>` or `line-<line>`; it is not
+a native provider request ID. These are observation identities, not proof that
+all requests were logged. Total requests and request coverage remain unknown for
+both runtimes. Every settled assistant record emits a snapshot even when usage and
+cost are absent; compaction/summary records emit one only when usage is present.
+Explicit zero remains zero. Input including cache requires both input and cache
+read; explicit total takes precedence, otherwise total requires complete input
+and output. `cumulative` is retained for compatibility but must not fill missing
+request fields. Totals over complete observed records have observed-record scope,
+not complete request coverage or actual account billing.
+
+These fields extend v1 and are **not** compatible with old strict consumers:
+upgrade consumers first. Old consumers must fail closed without advancing their
+cursor. New Stats accepts old archives but quarantines old/mixed pi/dsh
+observations without this metadata or a matching snapshot for each settled
+assistant record: complete usage/cost and API estimates stay unknown, retaining
+only available observed subtotals. An old Stats projection is similarly restricted
+at read time without rewriting the database. Neither old `last_usage` (which may
+already contain zero-filled components) nor synthetic cumulative counters can
+recover lost presence. Trace skips unchanged `record_hash` rows, so reimporting
+an identical file does not upgrade its normalized data. Archives therefore record
+the projection that produced their events and refuse mixed writes; see
+[Projection version and archive upgrades](#projection-version-and-archive-upgrades).
+Event revision semantics are not solved by this extension.
 
 A tool return is evidence of an observed result, NOT evidence of task success.
 
@@ -223,8 +258,8 @@ Usage mapping follows the v1 convention that input includes cached input:
 | `usage.cost.total` | `cost_usd` |
 | `usage.cost.totalFromProvider` | `cost_source=provider`, else `model_rates` |
 
-`cumulative` is the adapter's running sum over this file, so consumers that only
-understand cumulative deltas still see the same per-request usage. Pi `/fork`
+`cumulative` is the adapter's running sum over known fields in this file; it
+cannot recover missing per-request facts. Pi `/fork`
 and `/clone` copy entries verbatim; the header keeps the original entry
 timestamps and names the source in `parentSession`. The adapter records that id
 as `forked_from_session_id`, and consumers skip entries older than the new

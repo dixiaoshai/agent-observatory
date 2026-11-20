@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { coverageText, subtotal, turnCost, turnTokens } from '../lib/coverage';
 import { getSession } from '../lib/api';
 import type { Filters, Selection, SessionDetail, Turn } from '../types';
 import { ContentTimeline } from './ContentTimeline';
@@ -115,6 +116,7 @@ export function SessionDialog({
             {filters.end ? formatDate(filters.end) : '不限结束'} · 模型 {filters.model || '全部'} ·
             工作区 {filters.project || '全部'}
           </p>
+          <p className="metadata">{coverageText(detail.session.request_coverage)}</p>
           {detail.warnings.map((warning, i) => (
             <p className="notice" key={`${i}-${warning}`}>
               {warning}
@@ -173,7 +175,7 @@ function TurnDetail({ turn }: { turn: Turn }) {
     ['模型', turn.model || '未知'],
     ['轮次 ID', turn.native_id || '未知'],
     ['归属', attributionLabel(turn.attribution)],
-    ['Token', formatNumber(turn.token_total)],
+    ['Token', turnTokens(turn)],
     [
       '输入 / 缓存输入',
       `${formatNumber(turn.input_tokens)} / ${formatNumber(turn.cached_input_tokens)}`,
@@ -188,13 +190,22 @@ function TurnDetail({ turn }: { turn: Turn }) {
       `${formatNumber(turn.output_tokens)} / ${formatNumber(turn.reasoning_output_tokens)}`,
     ],
     [
-      turn.cost_basis === 'recorded' ? '记录费用' : '估算费用',
-      turn.estimated_cost == null
-        ? `未知${turn.estimated_cost_reason ? ` · ${turn.estimated_cost_reason}` : ''}`
-        : turn.cost_basis === 'recorded'
-          ? `${formatCost(turn.estimated_cost)} USD · pi 记录值，非实际账单`
-          : `${formatCost(turn.estimated_cost)} USD · 非实际账单`,
+      turn.cost_basis === 'recorded'
+        ? '记录费用'
+        : turn.cost_basis === 'mixed'
+          ? '记录 / 估算费用'
+          : 'API 等价估算费用',
+      `${turnCost(turn)} USD · 非实际账单${turn.estimated_cost_reason ? ` · ${turn.estimated_cost_reason}` : ''}`,
     ],
+    ...(turn.api_estimated_cost_known != null || turn.api_estimated_cost != null
+      ? [
+          [
+            '当前 API 等价估算',
+            `${subtotal(turn.api_estimated_cost ?? null, turn.api_estimated_cost_known, formatCost)} USD · 非账单`,
+          ] as [string, string],
+        ]
+      : []),
+    ['观测范围', coverageText(turn.request_coverage)],
     ...(turn.cost_breakdown
       ? [
           [

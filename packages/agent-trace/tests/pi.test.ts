@@ -76,6 +76,7 @@ test('pi sessions normalize to v1 turns, usage and tools', t => {
     turn_id: 'u1', root_turn_id: null, model: 'deepseek-flash',
     cumulative: { input_tokens: 150, cached_input_tokens: 50, cache_write_input_tokens: 0, output_tokens: 20, reasoning_output_tokens: 5, total_tokens: 170 },
     last_usage: { input_tokens: 150, cached_input_tokens: 50, cache_write_input_tokens: 0, output_tokens: 20, reasoning_output_tokens: 5, total_tokens: 170 },
+    usage_basis: 'request', request_id: 'a1', request_id_source: 'pi_entry',
     rate_limit_only: false, cost_usd: 0.001, cost_source: 'model_rates',
   });
   // Pi's input excludes cache reads; v1 input includes them.
@@ -109,6 +110,54 @@ test('pi sessions normalize to v1 turns, usage and tools', t => {
   assert.equal(again.imported, 0);
   assert.equal(again.skipped, 12);
   assert.equal(archive.exportBatch(0, 100).events.length, 12);
+});
+
+test('pi preserves missing, zero, cost-only and record identity facts', t => {
+  const rows = [
+    { type: 'session', id: 'facts', timestamp: '2026-01-01T00:00:00Z' },
+    { type: 'message', id: 'a', message: { role: 'assistant', usage: { input: 4, output: 2 } } },
+    { type: 'message', id: 'b', message: { role: 'assistant', usage: { input: 0, cacheRead: 0, output: 0 } } },
+    { type: 'message', id: 'c', message: { role: 'assistant', usage: { cost: { total: 0, totalFromProvider: true } } } },
+    { type: 'message', message: { role: 'assistant' } },
+    { type: 'message', id: 'd', message: { role: 'assistant', usage: { cacheRead: 3, totalTokens: 9 } } },
+    { type: 'compaction', id: 'compact', usage: { output: 1 } },
+    { type: 'branch_summary', id: 'empty' },
+  ];
+  const { filename, archive } = setup(t, rows.map(row => JSON.stringify(row)).join('\n') + '\n');
+  archive.importFile(filename, 'device-a', 'demo');
+  const facts = archive.exportBatch(0, 100).events.filter(event => event.kind === 'usage.snapshot');
+  assert.equal(facts.length, 6);
+  assert.deepEqual(facts.map(event => event.data.last_usage), [
+    { output_tokens: 2 }, { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+    {}, {}, { cached_input_tokens: 3, total_tokens: 9 }, { output_tokens: 1 },
+  ]);
+  assert.deepEqual(facts.map(event => [event.data.request_id, event.data.request_id_source]), [
+    ['a', 'pi_entry'], ['b', 'pi_entry'], ['c', 'pi_entry'], [null, 'source_record'],
+    ['d', 'pi_entry'], ['compact', 'source_record'],
+  ]);
+  assert.ok(facts.every(event => event.data.usage_basis === 'request'));
+  assert.equal(facts[2]!.data.cost_usd, 0);
+  assert.equal(facts[2]!.data.cost_source, 'provider');
+});
+
+test('pi rejects unsafe request IDs without changing record event identities', t => {
+  const ids = [' ', ' leading', 'trailing ', 'a\u0001b', 'a\u007fb', 'x'.repeat(4097), 'x'.repeat(4096)];
+  const rows = [
+    { type: 'session', id: 'id-check', timestamp: '2026-01-01T00:00:00Z' },
+    ...ids.map(id => ({ type: 'message', id, message: { role: 'assistant' } })),
+    { type: 'compaction', id: ' invalid ', usage: { output: 1 } },
+  ];
+  const { filename, archive } = setup(t, rows.map(row => JSON.stringify(row)).join('\n') + '\n');
+  archive.importFile(filename, 'device-a', 'demo');
+  const facts = archive.exportBatch(0, 100).events.filter(event => event.kind === 'usage.snapshot');
+  assert.equal(facts.length, 8);
+  assert.ok(facts.slice(0, 6).every(event => event.data.request_id === null && event.data.request_id_source === 'source_record'));
+  assert.equal(facts[6]!.data.request_id, ids[6]);
+  assert.equal(facts[6]!.data.request_id_source, 'pi_entry');
+  assert.equal(facts[7]!.data.request_id, null);
+  assert.equal(facts[7]!.data.request_id_source, 'source_record');
+  assert.equal(new Set(facts.map(event => event.event_id)).size, facts.length);
+  assert.equal(archive.importFile(filename, 'device-a', 'demo').imported, 0);
 });
 
 test('pi metadata hides message bodies while content keeps the original entry', t => {

@@ -62,6 +62,35 @@ test('accepts session.title revisions as display metadata', () => {
   assert.throws(() => validatePage(unexpected, OPTIONS), isInvalidPage);
 });
 
+test('request usage metadata accepts observed identities and rejects invalid combinations', () => {
+  const usage = (runtime: string, data: Record<string, unknown>) => {
+    const result = codexEvent({ seq: 1, kind: 'usage.snapshot', line: 101, data });
+    result.runtime = runtime;
+    result.session_key = JSON.stringify([runtime, result.instance_id, result.session_id]);
+    return pageOf([result]);
+  };
+  const good = { usage_basis: 'request', request_id: 'entry', request_id_source: 'pi_entry' };
+  for (const page of [usage('pi', good), usage('pi', { ...good, request_id: null, request_id_source: 'source_record' }),
+    usage('pi', { ...good, request_id: 'a'.repeat(4096), request_id_source: 'source_record' }),
+    usage('pi', { ...good, request_id: '\u0085entry' }), usage('pi', { ...good, request_id: 'entry\u0085' }),
+    usage('dsh', { ...good, request_id_source: 'dsh_record' }), usage('pi', {})]) {
+    assert.equal(validatePage(page, OPTIONS).events.length, 1);
+  }
+  for (const page of [usage('pi', { ...good, usage_basis: 'session' }), usage('pi', { ...good, usage_basis: null }),
+    usage('pi', { ...good, request_id_source: 'bad' }), usage('pi', { ...good, request_id_source: 1 }),
+    usage('pi', { ...good, request_id: '' }), usage('pi', { ...good, request_id: 'a'.repeat(4097) }),
+    usage('pi', { ...good, request_id: ' entry ' }), usage('pi', { ...good, request_id: 'x\u007f' }),
+    usage('pi', { ...good, request_id: '😀'.repeat(2049) }),
+    usage('pi', { ...good, request_id: '\ufeffentry' }), usage('pi', { ...good, request_id: 'entry\ufeff' }),
+    usage('pi', { ...good, request_id: 1 }), usage('pi', { ...good, request_id: null }),
+    usage('dsh', { ...good, request_id_source: 'dsh_record', request_id: null }), usage('dsh', good),
+    usage('pi', { ...good, request_id_source: 'dsh_record' }), usage('dsh', { ...good, request_id_source: 'source_record' }),
+    usage('codex', good), usage('other', good), usage('pi', { usage_basis: 'request' }),
+    usage('pi', { request_id: 'entry', request_id_source: 'pi_entry' }), usage('pi', { usage_basis: 'request', request_id: 'entry' })]) {
+    assert.throws(() => validatePage(page, OPTIONS), isInvalidPage);
+  }
+});
+
 test('all invalid fixtures are rejected as permanent errors', () => {
   const manifest = loadFixture('manifest.json') as { fixtures: Array<{ file: string; valid: boolean }> };
   for (const fixture of manifest.fixtures.filter((entry) => !entry.valid)) {

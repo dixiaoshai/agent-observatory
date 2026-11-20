@@ -33,6 +33,20 @@ export interface Evidence {
   line: number;
   timestamp: string | null;
 }
+export interface RequestCoverage {
+  scope: 'observed_usage_records';
+  total_requests: null;
+  usage_ratio: null;
+  cost_ratio: null;
+  observed_records: number;
+  records_with_usage: number;
+  unknown_usage_records: number;
+  records_with_cost: number;
+  unknown_cost_records: number;
+  unresolved_turns: number;
+  attribution_uncertain_turns?: number;
+  fields: Record<string, { known_records: number; unknown_records: number }>;
+}
 export interface Turn {
   id: string;
   native_id: string;
@@ -58,6 +72,14 @@ export interface Turn {
   output_tokens: Metric;
   reasoning_output_tokens: Metric;
   estimated_cost: Metric;
+  estimated_cost_known?: Metric;
+  token_known?: Metric;
+  recorded_cost_known_usd?: Metric;
+  api_estimated_cost?: Metric;
+  api_estimated_cost_known?: Metric;
+  usage_known?: Record<string, Metric>;
+  usage_records?: { usage: Record<string, number>; cost_usd: Metric; model: string }[];
+  request_coverage?: RequestCoverage;
   estimated_cost_reason: string | null;
   cost_breakdown: { input: number; cached_input: number; output: number } | null;
   cost_basis?: 'recorded' | 'estimated' | 'mixed' | null;
@@ -68,6 +90,7 @@ export interface Turn {
   attribution: string;
 }
 export interface Session {
+  request_coverage?: RequestCoverage;
   id: string;
   native_id?: string;
   title: string | null;
@@ -94,6 +117,7 @@ export interface Session {
   instance: string;
 }
 export interface Summary {
+  request_coverage?: RequestCoverage;
   sessions: number;
   turns: number;
   token_total: Metric;
@@ -125,6 +149,7 @@ export interface Pricing {
   models: Record<string, { input: number; cached_input: number; output: number }>;
 }
 export interface Bucket {
+  request_coverage?: RequestCoverage;
   turns: number;
   token_total: Metric;
   token_known: Metric;
@@ -155,6 +180,7 @@ export interface Overview {
 }
 export interface SessionDetail {
   session: {
+    request_coverage?: RequestCoverage;
     id: string;
     title?: string | null;
     native_id?: string;

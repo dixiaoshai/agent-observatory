@@ -5,6 +5,7 @@ import math
 from datetime import datetime, timezone
 
 from .codex import FIELDS, summarize_events, timestamp, usage_total
+from .usage import quarantine_request_totals
 
 _COMMON = {'turn_id', 'root_turn_id', 'model'}
 _FIELDS = {
@@ -14,7 +15,8 @@ _FIELDS = {
     'message.user': {'title'}, 'message.assistant': set(), 'reasoning.summary': {'available'},
     'tool.called': {'call_id', 'name', 'input_bytes'},
     'tool.returned': {'call_id', 'output_bytes', 'status'},
-    'usage.snapshot': {'cumulative', 'last_usage', 'rate_limit_only', 'cost_usd', 'cost_source'},
+    'usage.snapshot': {'cumulative', 'last_usage', 'rate_limit_only', 'cost_usd', 'cost_source',
+                       'usage_basis', 'request_id', 'request_id_source'},
     'context.compacted': set(), 'source.unknown': set(), 'session.deleted': set(),
 }
 _ENVELOPE = {'schema_version', 'event_id', 'archive_seq', 'runtime', 'instance_id', 'session_id',
@@ -23,6 +25,10 @@ _ENVELOPE = {'schema_version', 'event_id', 'archive_seq', 'runtime', 'instance_i
 _HEX = set('0123456789abcdef')
 _RUNTIMES = {'codex', 'pi', 'dsh'}
 _COST_SOURCES = {'provider', 'model_rates'}
+# ECMAScript WhiteSpace + LineTerminator, matching the producer's String.trim().
+# Python's default strip() additionally removes U+0085 but omits U+FEFF.
+_JS_WHITESPACE = ('\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005'
+                  '\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff')
 
 
 def _canonical(value):
@@ -102,6 +108,22 @@ def _validate_event(event, after, end):
     allowed = _COMMON | _FIELDS.get(event['kind'], set())
     if not isinstance(data, dict) or set(data) - allowed:
         raise ValueError('unsupported metadata fields')
+    request_fields = {'usage_basis', 'request_id', 'request_id_source'}
+    if request_fields & set(data):
+        if not request_fields <= set(data) or data['usage_basis'] != 'request':
+            raise ValueError('invalid request usage metadata')
+        identity_source = data['request_id_source']
+        allowed_sources = {'pi': {'pi_entry', 'source_record'}, 'dsh': {'dsh_record'}}
+        if not isinstance(identity_source, str) or identity_source not in allowed_sources.get(event['runtime'], set()):
+            raise ValueError('invalid request identity source')
+        request_id = data['request_id']
+        if request_id is None:
+            if identity_source != 'source_record':
+                raise ValueError('missing request record identity')
+        elif (not isinstance(request_id, str) or not request_id or request_id.strip(_JS_WHITESPACE) != request_id
+              or len(request_id.encode('utf-16-le', errors='surrogatepass')) > 8192
+              or any(ord(c) < 32 or ord(c) == 127 for c in request_id)):
+            raise ValueError('invalid request record identity')
     for name, value in data.items():
         if name in ('cumulative', 'last_usage'):
             if not isinstance(value, dict) or set(value) - set(FIELDS) or any(not _integer(v) for v in value.values()):
@@ -150,7 +172,10 @@ def _observation(event):
     if kind == 'usage.snapshot':
         clean.update(cumulative=usage_total(data.get('cumulative')), last_usage=usage_total(data.get('last_usage')),
                      rate_limit_only=data.get('rate_limit_only', False),
-                     cost_usd=data.get('cost_usd'), cost_source=data.get('cost_source'))
+                     cost_usd=data.get('cost_usd'), cost_source=data.get('cost_source'),
+                     usage_basis=data.get('usage_basis'), request_id=data.get('request_id'),
+                     request_id_source=data.get('request_id_source'),
+                     event_id=event['event_id'], source=dict(event['source']))
     return (timestamp(event['occurred_at']), event['source']['line'], native, clean)
 
 
@@ -179,6 +204,20 @@ def _rollout_result(events):
     result, _ = summarize_events(observations, meta, instance=start['instance_id'], runtime=start['runtime'])
     if not result:
         return None
+    if start['runtime'] in ('pi', 'dsh'):
+        # Old producers dropped wholly missing usage and zero-filled cache
+        # components. Absence of the new metadata cannot be repaired by reading
+        # synthetic cumulative counters. Also quarantine a mixed old/new file.
+        snapshots = [e for e in events if e['kind'] == 'usage.snapshot']
+        paired = {(e['source']['line'], e['source']['record_hash']) for e in snapshots
+                  if e['data'].get('usage_basis') == 'request'}
+        incomplete = (any(e['data'].get('usage_basis') != 'request' for e in snapshots)
+                      or any((e['source']['line'], e['source']['record_hash']) not in paired
+                             for e in events if e['kind'] == 'message.assistant'))
+        if incomplete:
+            result['warnings'].append('旧或混合 pi/dsh 归档缺少可靠逐调用事实，仅展示观测小计；请在新归档和新消费者库重建。')
+            for turn in result['turns']:
+                quarantine_request_totals(turn)
     revision_at = max((e['occurred_at'] for e in events if e['occurred_at']), default='')
     return (revision_at, len(events)), (result, start)
 

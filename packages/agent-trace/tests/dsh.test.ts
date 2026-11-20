@@ -250,6 +250,7 @@ test('dsh sessions decode concatenated zstd frames and normalize to v1 events', 
       input_tokens: 150, cached_input_tokens: 50, cache_write_input_tokens: 2,
       output_tokens: 20, reasoning_output_tokens: 5, total_tokens: 170,
     },
+    usage_basis: 'request', request_id: 'seq-5', request_id_source: 'dsh_record',
     rate_limit_only: false,
   });
 
@@ -266,6 +267,26 @@ test('dsh sessions decode concatenated zstd frames and normalize to v1 events', 
   const again = archive.importFile(filename, 'device-a', 'demo');
   assert.equal(again.imported, 0);
   assert.equal(again.skipped, 14);
+});
+
+test('dsh records preserve unknown and zero usage without claiming native request identity', t => {
+  const items = [
+    { type: 'session', version: 4, id: 'facts', createdAt: CREATED },
+    { type: 'assistant/message', seq: 1, data: { usage: { inputTokens: 4, outputTokens: 2 } } },
+    { type: 'assistant/message', seq: 2, data: { usage: { inputTokens: 0, cacheReadTokens: 0, outputTokens: 0 } } },
+    { type: 'assistant/message', data: {} },
+    { type: 'assistant/message', seq: 4, data: { usage: { cacheReadTokens: 3, totalTokens: 9 } } },
+    { type: 'compaction/summary', seq: 5, data: { usage: { outputTokens: 1 } } },
+    { type: 'compaction/summary', seq: 6, data: {} },
+  ];
+  const facts = importRows(t, items).filter(event => event.kind === 'usage.snapshot');
+  assert.deepEqual(facts.map(event => event.data.last_usage), [
+    { output_tokens: 2 }, { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+    {}, { cached_input_tokens: 3, total_tokens: 9 }, { output_tokens: 1 },
+  ]);
+  assert.deepEqual(facts.map(event => event.data.request_id), ['seq-1', 'seq-2', 'line-4', 'seq-4', 'seq-5']);
+  assert.ok(facts.every(event => event.data.request_id_source === 'dsh_record' && event.data.usage_basis === 'request'));
+  assert.ok(facts.every(event => !('cost_usd' in event.data)));
 });
 
 test('dsh content capture keeps the original record while metadata hides it', t => {

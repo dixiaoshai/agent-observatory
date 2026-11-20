@@ -56,7 +56,7 @@ const fields: Record<string, string[]> = {
   'turn.context': [], 'turn.started': [], 'turn.completed': [], 'turn.interrupted': [],
   'message.user': ['title'], 'message.assistant': [], 'reasoning.summary': ['available'],
   'tool.called': ['call_id', 'name', 'input_bytes'], 'tool.returned': ['call_id', 'output_bytes', 'status'],
-  'usage.snapshot': ['cumulative', 'last_usage', 'rate_limit_only', 'cost_usd', 'cost_source'], 'context.compacted': [],
+  'usage.snapshot': ['cumulative', 'last_usage', 'rate_limit_only', 'cost_usd', 'cost_source', 'usage_basis', 'request_id', 'request_id_source'], 'context.compacted': [],
   'source.unknown': [], 'session.deleted': [],
 };
 const usageKeys = new Set(['input_tokens', 'cached_input_tokens', 'cache_write_input_tokens', 'output_tokens', 'reasoning_output_tokens', 'total_tokens']);
@@ -106,6 +106,18 @@ function validEvent(event: Event): void {
   if ('cost_usd' in d && d.cost_usd !== null
       && (typeof d.cost_usd !== 'number' || !Number.isFinite(d.cost_usd) || d.cost_usd < 0)) invalid('Invalid cost');
   if ('cost_source' in d && d.cost_source !== null && !['provider', 'model_rates'].includes(d.cost_source as string)) invalid('Invalid cost source');
+  const requestFields = ['usage_basis', 'request_id', 'request_id_source'];
+  if (requestFields.some(key => key in d)) {
+    if (!requestFields.every(key => key in d) || d.usage_basis !== 'request'
+        || (event.runtime !== 'pi' && event.runtime !== 'dsh')
+        || !['pi_entry', 'dsh_record', 'source_record'].includes(d.request_id_source as string)
+        || (d.request_id_source === 'pi_entry' && event.runtime !== 'pi')
+        || (d.request_id_source === 'dsh_record' && event.runtime !== 'dsh')
+        || (d.request_id_source === 'source_record' && event.runtime !== 'pi')
+        || (d.request_id === null ? d.request_id_source !== 'source_record'
+           : typeof d.request_id !== 'string' || !ident.safeParse(d.request_id).success || d.request_id.length > 4096
+             || d.request_id.trim() !== d.request_id || /[\x00-\x1f\x7f]/.test(d.request_id))) invalid('Invalid request usage metadata');
+  }
   if ('status' in d && d.status !== 'result_observed') invalid('Invalid status');
   for (const key of ['cumulative', 'last_usage']) if (key in d) {
     if (!d[key] || typeof d[key] !== 'object' || Array.isArray(d[key])) invalid('Invalid usage');

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { coverageText, turnCost, turnTokens } from '../lib/coverage';
 import type { Overview, Selection, Session, Turn } from '../types';
 import { buildSessionTree, type SessionNode } from '../lib/sessionTree';
 import { buildTurnTree, type TurnNode } from '../lib/turnTree';
@@ -232,9 +233,11 @@ export function Sessions({ data, onSelect }: { data: Overview; onSelect: (s: Sel
         </div>
       </div>
       <p className="footnote">
-        费用按当前 API 标准短上下文单价估算，非实际账单；未记录缓存写入时按无单独计费写入估算，
+        费用可能为来源记录成本或按当前 API
+        标准短上下文单价估算，非实际账单；未记录缓存写入时按无单独计费写入估算，
         未还原请求级长上下文加价或工具附加费。未知模型或用量不参与估算。缓存和推理不重复计入 Token
-        总量；模型请求数未知。时间按 {Intl.DateTimeFormat().resolvedOptions().timeZone} 显示。
+        总量；{coverageText(data.summary.request_coverage)}。时间按{' '}
+        {Intl.DateTimeFormat().resolvedOptions().timeZone} 显示。
       </p>
     </section>
   );
@@ -386,7 +389,7 @@ function TurnTable({
               </td>
               <td>{formatDate(t.started_at)}</td>
               <td>{formatNumber(t.input_tokens)}</td>
-              <td>{formatNumber(t.token_total)}</td>
+              <td>{turnTokens(t)}</td>
               <td>
                 {formatNumber(t.cached_input_tokens)}
                 <small className="sub">
@@ -401,7 +404,7 @@ function TurnTable({
                     : t.estimated_cost_reason || '按 API 标准短上下文单价估算'
                 }
               >
-                {formatCost(t.estimated_cost)}
+                {turnCost(t)}
               </td>
               <td>未知</td>
               <td>
@@ -543,7 +546,15 @@ function SessionTable({
                       : s.cost_basis === 'mixed'
                         ? '记录/估算成本'
                         : '可估算'}
-                    {s.cost_samples < s.turns && s.cost_samples > 0 ? ' · 已知小计' : ''}
+                    {s.estimated_cost == null && s.estimated_cost_known != null
+                      ? ' · 已知小计'
+                      : ''}
+                    {s.request_coverage && (
+                      <>
+                        <br />
+                        {coverageText(s.request_coverage)}
+                      </>
+                    )}
                   </small>
                 </td>
                 <td>
@@ -599,7 +610,7 @@ function SessionTable({
                 {formatNumber(turn.tools.length)}
                 <small className="sub">已观察记录</small>
               </td>
-              <td>{formatNumber(turn.token_total)}</td>
+              <td>{turnTokens(turn)}</td>
               <td className="cache-cell">
                 {formatNumber(turn.cached_input_tokens)}
                 <small className="sub">
@@ -613,7 +624,7 @@ function SessionTable({
                     : turn.estimated_cost_reason || '按 API 标准短上下文单价估算'
                 }
               >
-                {formatCost(turn.estimated_cost)}
+                {turnCost(turn)}
               </td>
               <td>
                 <span className="tag">{statusLabel(turn.status)}</span>

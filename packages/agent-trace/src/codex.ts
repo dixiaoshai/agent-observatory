@@ -1,7 +1,6 @@
 import type { TitleLookup } from './titles.ts';
 import { ArchiveError, hash, identifier, object, timestamp, type Event, type JsonObject, type View } from './types.ts';
 
-export const NORMALIZER_VERSION = 'codex-v1';
 const USAGE_FIELDS = ['input_tokens', 'cached_input_tokens', 'cache_write_input_tokens', 'output_tokens', 'reasoning_output_tokens', 'total_tokens'];
 function usage(value: unknown): JsonObject {
   const src = object(value) ?? {};

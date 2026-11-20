@@ -6,7 +6,9 @@ import json
 import re
 from datetime import datetime, timezone
 
-FIELDS = ('input_tokens', 'cached_input_tokens', 'cache_write_input_tokens', 'output_tokens', 'reasoning_output_tokens', 'total_tokens')
+from .usage import USAGE_FIELDS, summarize_records
+
+FIELDS = USAGE_FIELDS
 # Verified against local parent/child rollout snapshots, not a public format contract.
 PER_SESSION_VERSIONS = {'0.166.0-alpha.5.1', '0.166.0-alpha.6'}
 
@@ -145,6 +147,7 @@ def summarize_events(events, meta, warnings=None, instance='local', runtime='cod
     accounting_missing = False
     accounting_conflict = False
     gaps = {key: set() for key in FIELDS}
+    record_ids = set()
 
     def turn(tid, stamp, line, inferred=False):
         if not isinstance(tid, str) or not tid:
@@ -226,6 +229,34 @@ def summarize_events(events, meta, warnings=None, instance='local', runtime='cod
                 if target == active:
                     active = None
             elif subtype == 'token_count':
+                if runtime in ('pi', 'dsh'):
+                    # These adapters synthesize cumulative counters from sparse
+                    # per-call facts. Only last_usage preserves field presence;
+                    # equal counters may be distinct zero-token/cost-only calls.
+                    record_id = p.get('event_id') or '%s:%s' % (runtime, line)
+                    if record_id in record_ids:
+                        continue
+                    record_ids.add(record_id)
+                    target = explicit or active
+                    t = turn(target, stamp, line, inferred=not bool(explicit))
+                    turn_model = p.get('model')
+                    if isinstance(turn_model, str) and turn_model:
+                        if t['model'] and t['model'] != turn_model:
+                            t['model'] = '混合模型'
+                            warnings.append('同一轮次出现多个模型，按用量观测记录分别估算')
+                        else:
+                            t['model'] = turn_model
+                    t.setdefault('usage_records', []).append({
+                        'event_id': p.get('event_id'), 'request_id': p.get('request_id'),
+                        'request_id_source': p.get('request_id_source') or 'archive_event',
+                        'source': p.get('source'), 'timestamp': stamp, 'line': line,
+                        'model': turn_model, 'usage': usage(p.get('last_usage')),
+                        'cost_usd': p.get('cost_usd'), 'cost_source': p.get('cost_source'),
+                    })
+                    apply_title(t)
+                    if not target:
+                        warnings.append('用量无法可靠归属，单列未归属记录: 行 %d' % line)
+                    continue
                 current = p.get('cumulative') or {}
                 if not current:
                     if not p.get('rate_limit_only'):
@@ -350,6 +381,7 @@ def summarize_events(events, meta, warnings=None, instance='local', runtime='cod
         t['root_turn_id'] = next(iter(roots)) if len(roots) == 1 else None
         if fork_time_uncertain:
             t['_unrecoverable'].update(FIELDS)
+            t['usage_attribution_uncertain'] = True
         # Preserve positive write evidence even when incomplete later snapshots
         # make the total unknown. Pricing cannot then assume no paid writes.
         t['cache_write_observed'] = (t.get('cache_write_input_tokens') or 0) > 0
@@ -358,6 +390,16 @@ def summarize_events(events, meta, warnings=None, instance='local', runtime='cod
         # present a single basis when that happened.
         t['recorded_cost_source'] = (next(iter(cost_sources)) if len(cost_sources) == 1
                                      else ('mixed' if cost_sources else None))
+        if 'usage_records' in t:
+            summarize_records(t)
+            if t.get('usage_attribution_uncertain'):
+                t['recorded_cost_usd'] = None
+        elif t['recorded_cost_usd'] is not None:
+            # Native cumulative snapshots do not establish request identities or
+            # an exhaustive request-cost inventory, even if each has a cost.
+            t['recorded_cost_known_usd'] = t['recorded_cost_usd']
+            t['recorded_cost_usd'] = None
+            t['recorded_cost_incomplete'] = True
         for key in t.pop('_missing') | t.pop('_unrecoverable'):
             t['token_total' if key == 'total_tokens' else key] = None
         t.pop('_seen')
@@ -379,5 +421,6 @@ def summarize_events(events, meta, warnings=None, instance='local', runtime='cod
             'forked_from_id': forked_from,
             'usage_accounting': usage_accounting,
             'cli_version': meta.get('cli_version'), 'turns': result_turns,
+            **({'usage_projection_version': 2} if runtime in ('pi', 'dsh') else {}),
             'warnings': warnings, 'revision_at': max((e[0] for e in events if e[0]), default=''),
             'event_count': len(events)}, warnings

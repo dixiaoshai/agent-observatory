@@ -49,7 +49,7 @@ export function TokenBreakdown({ data }: { data: Overview }) {
               ? '观测小计（未去重）'
               : summary.token_total == null
                 ? '已知小计'
-                : '完整合计'}
+                : '已观测合计'}
           </small>
         </div>
         <BreakdownPie className="breakdown-chart" segments={segments} label={ariaLabel} />

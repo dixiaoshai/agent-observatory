@@ -241,7 +241,7 @@ function mapUsage(value: unknown): Usage | null {
   const reasoningTokens = integer(src.reasoningTokens);
   const total = integer(src.totalTokens);
   const fields: JsonObject = {};
-  if (input !== null) fields.input_tokens = input + (cacheRead ?? 0);
+  if (input !== null && cacheRead !== null) fields.input_tokens = input + cacheRead;
   if (cacheRead !== null) fields.cached_input_tokens = cacheRead;
   if (cacheWrite !== null) fields.cache_write_input_tokens = cacheWrite;
   if (output !== null) fields.output_tokens = output;
@@ -366,6 +366,10 @@ export function normalize(
       ...common(turnId),
       cumulative: { ...cumulative },
       last_usage: { ...usage.fields },
+      usage_basis: 'request',
+      request_id: Number.isSafeInteger(record.row.seq) && Number(record.row.seq) >= 0
+        ? `seq-${record.row.seq}` : `line-${record.line}`,
+      request_id_source: 'dsh_record',
       rate_limit_only: false,
     }, null, nativeType);
   };
@@ -465,8 +469,8 @@ export function normalize(
           available: true,
         }, { text: visibleReasoning }, 'assistant/message');
       }
-      const usage = mapUsage(data?.usage);
-      if (usage) addUsage(record, usage, turnOf(data), 'assistant/message');
+      const usage = mapUsage(data?.usage) ?? { fields: {} };
+      addUsage(record, usage, turnOf(data), 'assistant/message');
       for (const block of blocks(message?.content)) {
         if (block.type !== 'tool-call') continue;
         const callId = typeof block.id === 'string' && block.id ? block.id : null;

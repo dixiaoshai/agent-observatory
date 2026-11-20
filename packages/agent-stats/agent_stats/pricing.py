@@ -1,6 +1,8 @@
-"""Current standard short-context API equivalents, never actual account charges."""
+"""Source-recorded costs and current API equivalents, never account billing."""
 import math
 from decimal import Decimal
+
+from .usage import aggregate_request_coverage
 
 
 PRICING = {
@@ -33,6 +35,17 @@ def _amount(value):
 
 def estimate_turn(turn):
     """Enrich a copy at query time, so price changes do not require reimports."""
+    if turn.get('request_facts_unavailable') or turn.get('recorded_cost_incomplete'):
+        known = turn.get('recorded_cost_known_usd')
+        return dict(turn, estimated_cost=None, estimated_cost_known=known,
+                    estimated_cost_reason=('累计快照不能证明请求级记录费用完整性'
+                                           if turn.get('recorded_cost_incomplete') else
+                                           '旧投影缺少可靠逐调用事实，须在新库重建'),
+                    cost_breakdown=None, cost_basis='recorded' if known is not None else None,
+                    cost_source=turn.get('recorded_cost_source'),
+                    request_coverage=aggregate_request_coverage([turn]))
+    if turn.get('usage_records'):
+        return _estimate_records(turn)
     result = dict(turn, estimated_cost=None, estimated_cost_reason=None, cost_breakdown=None,
                   cost_basis=None, cost_source=None)
 
@@ -81,15 +94,61 @@ def estimate_turn(turn):
     return result
 
 
+def _sum_amount(values):
+    return _amount(sum((Decimal(str(v)) for v in values), Decimal(0))) if values else None
+
+
+def _estimate_records(turn):
+    """Do not fill a hole in recorded charges with today's API-equivalent price."""
+    records = turn['usage_records']
+    estimates = []
+    for record in records:
+        facts = dict(record['usage'], model=record['model'])
+        facts['token_total'] = facts.pop('total_tokens', None)
+        estimates.append(estimate_turn(facts))
+    api_values = [r['estimated_cost'] for r in estimates if r['estimated_cost'] is not None]
+    api_known = _sum_amount(api_values)
+    api_complete = api_known if len(api_values) == len(records) else None
+    recorded = [r['cost_usd'] for r in records if r['cost_usd'] is not None]
+    if recorded:
+        known = _sum_amount(recorded)
+        complete = known if len(recorded) == len(records) else None
+        basis, source = 'recorded', turn.get('recorded_cost_source')
+        breakdown = None
+        reason = None if complete is not None else '部分用量观测记录缺少记录费用；仅展示已知小计'
+    else:
+        known, complete = api_known, api_complete
+        basis, source = ('estimated', 'model_rates') if known is not None else (None, None)
+        breakdown = ({key: _sum_amount([r['cost_breakdown'][key] for r in estimates])
+                      for key in ('input', 'cached_input', 'output')}
+                     if complete is not None else None)
+        reason = None if complete is not None else '部分用量观测记录缺少可估算分类或单价'
+    if turn.get('usage_attribution_uncertain'):
+        complete = api_complete = None
+        breakdown = None
+        reason = '分叉继承归属不确定；仅为可能重叠的观测小计'
+    return dict(turn, estimated_cost=complete, estimated_cost_known=known,
+                estimated_cost_reason=reason, cost_breakdown=breakdown,
+                cost_basis=basis, cost_source=source,
+                api_estimated_cost=api_complete, api_estimated_cost_known=api_known,
+                request_coverage=aggregate_request_coverage([turn]))
+
+
 def aggregate_cost(turns, blocked=False):
+    blocked = blocked or any(t.get('usage_attribution_uncertain') for t in turns)
     values = [t['estimated_cost'] for t in turns if t.get('estimated_cost') is not None]
-    known = _amount(sum((Decimal(str(v)) for v in values), Decimal(0))) if values else None
-    bases = {t.get('cost_basis') for t in turns if t.get('estimated_cost') is not None}
+    subtotals = [t.get('estimated_cost_known', t.get('estimated_cost')) for t in turns]
+    known = _sum_amount([v for v in subtotals if v is not None])
+    bases = {t.get('cost_basis') for t in turns
+             if t.get('estimated_cost_known', t.get('estimated_cost')) is not None}
     basis = next(iter(bases)) if len(bases) == 1 else ('mixed' if bases else None)
     recorded = [t['estimated_cost'] for t in turns if t.get('cost_basis') == 'recorded'
                 and t.get('estimated_cost') is not None]
-    recorded_known = _amount(sum((Decimal(str(v)) for v in recorded), Decimal(0))) if recorded else None
+    recorded_subtotals = [t.get('estimated_cost_known', t.get('estimated_cost')) for t in turns
+                          if t.get('cost_basis') == 'recorded']
+    recorded_known = _sum_amount([v for v in recorded_subtotals if v is not None])
     return {
+        'request_coverage': aggregate_request_coverage(turns),
         'estimated_cost': known if values and len(values) == len(turns) and not blocked else None,
         'estimated_cost_known': None if blocked else known,
         'observed_estimated_cost_known': known,

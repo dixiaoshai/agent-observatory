@@ -62,7 +62,7 @@ const KIND_FIELDS: Record<string, string[]> = {
   'message.user': ['title'], 'message.assistant': [], 'reasoning.summary': ['available'],
   'tool.called': ['call_id', 'name', 'input_bytes'],
   'tool.returned': ['call_id', 'output_bytes', 'status'],
-  'usage.snapshot': ['cumulative', 'last_usage', 'rate_limit_only', 'cost_usd', 'cost_source'],
+  'usage.snapshot': ['cumulative', 'last_usage', 'rate_limit_only', 'cost_usd', 'cost_source', 'usage_basis', 'request_id', 'request_id_source'],
   'context.compacted': [], 'source.unknown': [], 'session.deleted': [],
 };
 const USAGE_KEYS = new Set([
@@ -160,6 +160,21 @@ function validateMetadata(event: PageEvent, rawData: Record<string, unknown>): v
   }
   if ('cost_source' in rawData && rawData.cost_source !== null && !['provider', 'model_rates'].includes(String(rawData.cost_source))) {
     invalid('Invalid cost source');
+  }
+  const requestFields = ['usage_basis', 'request_id', 'request_id_source'];
+  if (requestFields.some(key => key in rawData)) {
+    const source = rawData.request_id_source;
+    const id = rawData.request_id;
+    if (!requestFields.every(key => key in rawData) || rawData.usage_basis !== 'request'
+      || (event.runtime !== 'pi' && event.runtime !== 'dsh')
+      || !['pi_entry', 'dsh_record', 'source_record'].includes(source as string)
+      || (source === 'pi_entry' && event.runtime !== 'pi')
+      || (source === 'dsh_record' && event.runtime !== 'dsh')
+      || (source === 'source_record' && event.runtime !== 'pi')
+      || (id === null ? source !== 'source_record' : typeof id !== 'string' || id.length === 0
+         || id.length > 4096 || id.trim() !== id || /[\x00-\x1f\x7f]/.test(id))) {
+      invalid('Invalid request usage metadata');
+    }
   }
   if ('status' in rawData && rawData.status !== 'result_observed') invalid('Invalid status');
   for (const key of ['cumulative', 'last_usage']) if (key in rawData) assertUsage(rawData[key], `data.${key}`);

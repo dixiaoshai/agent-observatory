@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { coverageText } from '../lib/coverage';
 import type { Overview as OverviewData, Selection } from '../types';
 import {
   cacheRate,
@@ -58,6 +59,7 @@ export function Overview({
         <CostSummary data={data} />
         <ConcentrationCard data={data} onSelect={onSelect} />
       </div>
+      <p className="footnote">{coverageText(s.request_coverage)}。</p>
       <h2 className="section-label">单轮消耗（中位数）</h2>
       <div className="metrics overview-metrics">
         <MetricCard
@@ -133,7 +135,8 @@ export function Overview({
           {s.aggregation_blocked && '父子观测值未去重，可能重复。'}
         </p>
         <p>
-          {s.sessions} 个会话 · {formatNumber(s.tool_calls)} 条工具记录 · 模型请求数未知。
+          {s.sessions} 个会话 · {formatNumber(s.tool_calls)} 条工具记录 ·{' '}
+          {coverageText(s.request_coverage)}。
         </p>
       </details>
       <details className="panel overview-support pricing-details">
@@ -268,7 +271,7 @@ export function Overview({
         </article>
       </div>
       <p className="footnote">
-        仅统计当前筛选范围的已知样本。费用为 API 等价估算，非实际账单。
+        仅统计当前筛选范围的已知样本。费用可能为来源记录成本或当前 API 等价估算，非实际账单。
         {s.aggregation_blocked && '父子会话观测值未去重，不代表实际联合用量。'}
       </p>
     </div>
@@ -306,7 +309,7 @@ function CostSummary({ data }: { data: OverviewData }) {
   const total = parts.reduce((n, p) => n + p.value, 0);
   return (
     <article className="panel summary-card cost-summary">
-      <h3>估算费用</h3>
+      <h3>费用（记录 / API 等价估算）</h3>
       <div className="breakdown-layout">
         <div className="breakdown-amount">
           <strong className="accent" title={formatCost(value)}>
@@ -337,8 +340,8 @@ function CostSummary({ data }: { data: OverviewData }) {
       </div>
       <p className="card-note">
         {s.aggregation_blocked ? '观测小计未去重 · ' : ''}
-        {s.cost_samples < s.turns ? '已知小计 · ' : ''}构成覆盖 {rows.length}/{s.turns}{' '}
-        轮；仅按已估算分类拆分。
+        {s.estimated_cost == null && value != null ? '已知小计 · ' : ''}构成覆盖 {rows.length}/
+        {s.turns} 轮；仅按已估算分类拆分。
       </p>
     </article>
   );
