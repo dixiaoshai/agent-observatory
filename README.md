@@ -83,6 +83,7 @@ python3 -m pip install /absolute/path/to/agent_stats-0.1.0-py3-none-any.whl
 
 ## 文档与验证
 
+- [项目 Review：使用追踪、消耗、复盘与经验沉淀](docs/REVIEW-2026-11-15.md)
 - [架构与依赖边界](docs/ARCHITECTURE.md)
 - [数据源接入指南](docs/DATA-SOURCES.md)
 - [安装、开发与发布](docs/DEVELOPMENT.md)

@@ -15,9 +15,11 @@
 
 ### 1. 请求级用量与费用覆盖（Stats / Trace）
 
-- [ ] 在新代码用合成样例复核历史发现：同一轮多次请求仅部分有 usage / cost 时，轮次覆盖及费用是否被误判为完整；区分 DSH、pi 等来源可提供的请求身份。
-- [ ] 若确认缺陷，保留可验证请求身份，分别展示完整总量、已知小计、未知与覆盖；不凭消息数推测请求总数，不把记录费用与 API 估算混同。
+- [x] 在新代码用合成样例复核历史发现：同一轮多次请求仅部分有 usage / cost 时，轮次覆盖及费用是否被误判为完整；区分 DSH、pi 等来源可提供的请求身份。
+- [x] 确认并修复缺陷：保留 pi 原生条目 / DSH 日志记录的可验证观测身份，分别展示已观测完整总量、已知小计、未知与逐字段覆盖；实际请求总数/覆盖为未知，不凭消息数推测，不把记录费用与当前 API 等价估算混同。见[本轮验证](docs/VALIDATION.md#请求级用量与费用覆盖2026-11-15)与[输出/升级契约](packages/agent-stats/docs/SOURCES.md#observed-usage-costs-and-coverage-in-query-results)。旧/混合归档保守隔离，新语义需先升级消费者并显式新库重建，不包含第二项事件修订修复。
 - **验收**：两次请求仅一次有 usage / cost 的回归样例不会显示完整总量；缺失与 0 分别测试；来源无法提供请求总数时覆盖为未知；既有直接 Codex、Trace 和自定义来源统计不回归。
+- [x] Trace 归档记录归一化投影版本（`normalizer_version`）：跨版本写入、`ingest`/`reingest` 与 `serve` 以 `PROJECTION_MISMATCH` 拒绝，避免新旧投影无声混合；`status` 暴露归档版本与当前期望版本。见[验证](docs/VALIDATION.md#trace-归档投影版本与升级守卫2026-11-16)。
+- [x] 在授权下执行现有 metadata / content 归档与 Stats、Journal、Knowledge 消费库的显式重建（2026-11-16）：Stats 告警由 86 条降为 0（仅余真实口径限制 1 条），`request_coverage` 开始输出；旧库整库备份可回滚。见[验证](docs/VALIDATION.md#迁移执行与结果2026-11-16获授权)。Knowledge 证据库回放在后台补齐；事件修订/撤回语义仍归下一项。
 
 ### 2. 事件修订、替换与撤回（Trace → 消费方）
 
