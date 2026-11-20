@@ -4,7 +4,7 @@
 
 ## 同步与数据来源
 
-Stats 通过自己的 `follow --config` 主动拉取 Agent Trace 的本机 metadata API，进度、重试与租约都留在 Stats 本地；Trace 不向本项目推送，也不管理消费游标。看板用 `serve --archive-only` 只读已接收的统计库，启动与页面刷新都不访问 Codex 源日志。自定义 JSON / Python provider 不需要 Trace。相关约定见[消费方 follow 约定](../../agent-trace/docs/consumer-follow.md)。
+Stats 通过自己的 `follow --config` 主动拉取 Agent Trace 的本机 metadata API，进度、重试与租约都留在 Stats 本地；Trace 不向本项目推送，也不管理消费游标。看板用 `serve --archive-only` 只读已接收的统计库，启动与页面刷新都不访问 Codex 源日志。自定义 JSON / Python provider 不需要 Trace。相关约定见[消费方接入与同步](../../../docs/TRACE-CONSUMERS.md)。
 
 ## 文档
 

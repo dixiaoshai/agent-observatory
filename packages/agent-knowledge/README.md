@@ -52,7 +52,7 @@ npm run cli -- search --query "刷新令牌保存在哪里" --project demo
 - `allowed_project_ids` 对归档是**消费范围**：名单外事件（含删除标记）被跳过、不写库，游标仍前进；显式查询名单外项目仍返回 `FORBIDDEN`。
 - 缩小或扩大消费范围都不会改动已有证据：缩小时不清理已导入证据，扩大时不回填已跳过的历史。
 
-配置、命令、follow 状态和故障语义见[运行指南](docs/running.md)。
+配置、命令、follow 状态和故障语义见[运行指南](docs/RUNNING.md)；跨包分页与消费约定见[消费方接入与同步](../../docs/TRACE-CONSUMERS.md)。
 
 ## MCP 与 skill
 
@@ -64,12 +64,12 @@ node dist/interfaces/cli.js serve --config /absolute/path/to/agent-knowledge.exa
 
 将 `skills/agent-knowledge` 安装到宿主实际使用的技能目录后，agent 会在任务开始时按需检索知识、读取来源核实，并在获得新事实或验证结果时保存有来源的记忆（写入工具尚未实现，skill 不会虚构这些能力）。兼容目录 `skills/knowrelay` 只作为旧名称入口。
 
-宿主接入、工具参数和边界见[运行指南](docs/running.md)。
+宿主接入、工具参数和边界见[运行指南](docs/RUNNING.md)。
 
 ## 文档索引
 
-- [运行指南](docs/running.md)：安装、配置、同步与读取、删除、归档证据、follow、MCP 与当前边界。
-- [架构](docs/architecture.md)：职责、边界、技术结构、存储接口、检索与数据可靠性。
+- [运行指南](docs/RUNNING.md)：安装、配置、同步与读取、删除、归档证据、follow、MCP 与当前边界。
+- [架构](docs/ARCHITECTURE.md)：职责、边界、技术结构、存储接口、检索与数据可靠性。
 - [来源与适配器](docs/SOURCES.md)：独立安装示例、程序化扫描器契约与信任边界。
 - [知识使用 skill](skills/agent-knowledge/SKILL.md)：检索、来源核实、记忆保存的行为约定。
 - 根文档：[架构](../../docs/ARCHITECTURE.md)、[开发指南](../../docs/DEVELOPMENT.md)、[安全说明](../../docs/SAFETY.md)、[命名规则](../../docs/NAMING.md)、[当前任务](../../TODO.md)。

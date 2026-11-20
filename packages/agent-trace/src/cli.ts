@@ -46,7 +46,7 @@ does not exist. An explicit --db always takes precedence. config-check validates
 a service configuration without creating a database, starting collection or
 opening a listener. serve runs collection and/or the read-only loopback API in
 the foreground until SIGINT/SIGTERM; startup, scan and stop events are emitted
-as NDJSON. See docs/service-config.md and docs/local-api.md.
+as NDJSON. See docs/SERVICE-CONFIG.md and docs/LOCAL-API.md.
 `;
 const commandOptions: Record<string, ParseArgsConfig['options']> = {
   ingest: { source: { type: 'string', multiple: true }, instance: { type: 'string' }, project: { type: 'string' }, runtime: { type: 'string' }, capture: { type: 'string' } },

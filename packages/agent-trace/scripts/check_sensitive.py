@@ -41,7 +41,7 @@ MAX_BYTES = 2 * 1024 * 1024
 # Keep this list minimal: every entry needs a reason, and real credentials or
 # real home directories must be removed instead of allowlisted.
 ALLOW = [
-    ("docs/content-capture.md", "url credentials"),  # user:password@host placeholder
+    ("docs/CONTENT-CAPTURE.md", "url credentials"),  # user:password@host placeholder
     ("tests/content.test.ts", "github token"),        # synthetic ghp_ fixture
     ("tests/pi.test.ts", "personal home path"),       # /home/user placeholder
     ("tests/titles.test.ts", "personal home path"),   # /home/u placeholder

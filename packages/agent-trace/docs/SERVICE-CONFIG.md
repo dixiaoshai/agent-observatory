@@ -1,6 +1,6 @@
 # 服务配置
 
-常驻 `serve`、`config-check`、`reingest` 与 `gc` 共用一份严格 JSON 服务配置。本机读取接口见[本机只读 API](local-api.md)，消费方约定见[消费方 follow 约定](consumer-follow.md)，采集与进程边界见[架构说明](architecture.md)。
+常驻 `serve`、`config-check`、`reingest` 与 `gc` 共用一份严格 JSON 服务配置。本机读取接口见[本机只读 API](LOCAL-API.md)，消费方约定见[消费方接入与同步](../../../docs/TRACE-CONSUMERS.md)，采集与进程边界见[架构说明](ARCHITECTURE.md)。
 
 ## 命令与副作用
 
@@ -16,9 +16,9 @@ npm run cli -- gc --config PATH [--db OVERRIDE.sqlite] [--dry-run]
 
 `serve` 在前台运行到 SIGINT/SIGTERM：先校验配置并打开数据库，检查捕获模式；若归档记录的 `normalizer_version` 与当前构建的 `PROJECTION_VERSION` 不一致，`serve` 在采集和 API 启动前以 `PROJECTION_MISMATCH` 退出（旧归档只能通过 CLI `export` / `read` / `status` 检视），避免把混合投影当成当前数据下发给消费方。之后采集开启时获取单归档租约并周期性扫描，API 开启时只监听配置的回环地址。停止时不再调度新扫描、等待当前归档事务结束、关闭监听并释放租约。`collection.enabled` 与 `api.enabled` 都为 `false` 时拒绝启动。启动、扫描、错误和停止事件以 NDJSON 输出到 stdout，不包含 token、正文或原始对象。
 
-`reingest` 用于同版本投影的归档补录：它只重读 `collection_files` 中已记为 `imported` 的文件，按配置的项目范围重新规范化；内容未变的行保持事件身份与去重，之后才出现在源文件里的记录（例如 `session.title` 标题修订）会作为新事件追加并推进消费游标。它**不会**重算已归档事件的负载：适配器语义变化要求提升 `PROJECTION_VERSION`，此时归档记录的是旧 `normalizer_version`，`ingest` / `reingest` / `serve` 都会以 `PROJECTION_MISMATCH` 拒绝写入，必须先按[协议](protocol.md#投影版本与归档升级)重建新归档并重建消费方库；`status` 会同时报告归档版本和当前构建期望的版本。来源侧已经清理的文件（例如 Codex 删除旧 rollout）计入 `missing`，不会让整个命令失败；只有读取错误、项目不匹配等才进入 `errors` 并以退出码 1 报告。它需要单归档采集租约，因此必须先停止 `serve`（或让租约过期），否则以 `COLLECTION_BUSY` 失败。已结束的会话不会因为源文件不变而被采集器自动重读，这是补上旧归档标题的受支持方式；未跟踪的文件仍用 `ingest`。
+`reingest` 用于同版本投影的归档补录：它只重读 `collection_files` 中已记为 `imported` 的文件，按配置的项目范围重新规范化；内容未变的行保持事件身份与去重，之后才出现在源文件里的记录（例如 `session.title` 标题修订）会作为新事件追加并推进消费游标。它**不会**重算已归档事件的负载：适配器语义变化要求提升 `PROJECTION_VERSION`，此时归档记录的是旧 `normalizer_version`，`ingest` / `reingest` / `serve` 都会以 `PROJECTION_MISMATCH` 拒绝写入，必须先按[协议](PROTOCOL.md#投影版本与归档升级)重建新归档并重建消费方库；`status` 会同时报告归档版本和当前构建期望的版本。来源侧已经清理的文件（例如 Codex 删除旧 rollout）计入 `missing`，不会让整个命令失败；只有读取错误、项目不匹配等才进入 `errors` 并以退出码 1 报告。它需要单归档采集租约，因此必须先停止 `serve`（或让租约过期），否则以 `COLLECTION_BUSY` 失败。已结束的会话不会因为源文件不变而被采集器自动重读，这是补上旧归档标题的受支持方式；未跟踪的文件仍用 `ingest`。
 
-`gc` 只对 content 归档有意义：删除配置 blob 目录中形如 `<event_id>-<sha256>.txt` 且未被任何已提交事件引用的文件。`--dry-run` 只报告；metadata 库调用会报 `CAPTURE_MODE`。详见[正文归档](content-capture.md)。
+`gc` 只对 content 归档有意义：删除配置 blob 目录中形如 `<event_id>-<sha256>.txt` 且未被任何已提交事件引用的文件。`--dry-run` 只报告；metadata 库调用会报 `CAPTURE_MODE`。详见[正文归档](CONTENT-CAPTURE.md)。
 
 一份配置只对应一个归档数据库和一种 `capture_mode`。metadata 与 content 不能共用同一个数据库；需要同时提供两种视图时，分别用 `service.json` 和 `content.json` 启动两个 `serve`。它们可以使用不同端口、token 和项目范围，并可分别启停 / 重建；同一数据库仍只允许一个采集租约，不要用同一份配置启动两个进程。
 
@@ -86,7 +86,7 @@ npm run cli -- gc --config PATH [--db OVERRIDE.sqlite] [--dry-run]
 | `max_inline_bytes` | 否 | `65536` | 单个字符串内联上限，整数 `1..8388608`；超过时不截断，改存 `content_ref` 外置文件 |
 | `blob_directory` | 否 | `<数据库所在目录>/content-blobs` | 外置正文目录，相对路径相对配置文件；必须可写；文件 `0600`、目录 `0700` |
 
-脱敏规则固定、不可关闭，覆盖 `body`、`raw`、外置文件与运行日志，详见[正文归档](content-capture.md)。`content_ref` 是保留结构，消费方必须按绝对路径、字节数和 SHA-256 校验。content 模式应使用**独立数据库**；已有 metadata 库不能通过修改此配置补回正文。
+脱敏规则固定、不可关闭，覆盖 `body`、`raw`、外置文件与运行日志，详见[正文归档](CONTENT-CAPTURE.md)。`content_ref` 是保留结构，消费方必须按绝对路径、字节数和 SHA-256 校验。content 模式应使用**独立数据库**；已有 metadata 库不能通过修改此配置补回正文。
 
 ### `collection`
 
@@ -198,7 +198,7 @@ unset TOKEN
 | 历史回补 | `none` |
 | API 地址 | `127.0.0.1:8766` |
 | API 客户端 | 无；启用 API 时必须显式配置 |
-| 页大小 | 请求默认 500，最大 1000（见[本机 API](local-api.md)） |
+| 页大小 | 请求默认 500，最大 1000（见[本机 API](LOCAL-API.md)） |
 
 ## 采集状态与运行约束
 

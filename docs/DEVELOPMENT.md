@@ -78,6 +78,8 @@ Dependabot 配置在[根配置](../.github/dependabot.yml)：
 
 ## 验证范围
 
+`verify:consumers` 和 `verify:follow` 是仓库级集成检查，由根 CI 运行，不属于 Trace 的独立包检查。前者验证合成批次的独立分页、幂等重试、正文隔离、源文件删除后的证据读取和墓碑传播；后者使用临时回环服务验证 worker 重启后的独立恢复。实现见 Trace 的 [`verify-consumers.ts`](../packages/agent-trace/scripts/verify-consumers.ts)、[`verify-follow.ts`](../packages/agent-trace/scripts/verify-follow.ts)，共享协议样本见 [protocol fixtures](../packages/agent-trace/fixtures/protocol/README.md)。
+
 `verify:sources` 将各模块源码复制到无兄弟模块的独立临时目录，使用各自锁文件安装依赖并运行完整检查，显式拒绝 Node / Python 测试 skipped 和零测试。Journal 使用模块内合成协议 fixtures，Knowledge 的模块测试构造自己的合成页；缺必要资源会失败，不会静默少测。独立锁的传递版本可能不在根缓存中，此命令使用 prefer-offline，缺缓存时可正常下载；不是离线环境保证。
 
 `verify:packages` 构建并暂存发行物后，只从安装后的包读取示例、配置和 fixtures。Stats 用安装后的 `agent-stats example --output FILE` 提取随 wheel 提供的 JSON；Knowledge 直接运行 tarball 原始示例，不重写 import。配置复制到临时可写目录，不写 node_modules。

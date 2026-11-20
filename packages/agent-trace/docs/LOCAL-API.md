@@ -10,7 +10,7 @@ npm run cli -- serve --config path/to/service.json
 
 `serve` 在前台运行到 SIGINT/SIGTERM。`collection.enabled=false` 时只提供已有归档的 API；`api.enabled=false` 时只做采集。两者都关闭会拒绝启动。启动、扫描、采集错误和停止事件以 NDJSON 输出到 stdout；不含 token、正文或原始事件。
 
-配置与授权来源见[服务配置](service-config.md)。事件信封、游标和删除规则以 [v1 协议](protocol.md) 为准；本文只固定传输层。
+配置与授权来源见[服务配置](SERVICE-CONFIG.md)。事件信封、游标和删除规则以 [v1 协议](PROTOCOL.md) 为准；本文只固定传输层。
 
 ## 监听与访问策略
 
@@ -56,14 +56,14 @@ Accept: application/json
 ```
 
 - 默认 HTTP 分页与 CLI `export` 使用相同的事件顺序、身份、视图投影和游标语义。
-- `revisions=1` 时，批次额外包含 `removed_events`（无移除时为 `[]`）。`limit` 约束事件和标记的合计条数，`next_cursor` 可以落在标记上。详见[事件修订语义](protocol.md)。
+- `revisions=1` 时，批次额外包含 `removed_events`（无移除时为 `[]`）。`limit` 约束事件和标记的合计条数，`next_cursor` 可以落在标记上。详见[事件修订语义](PROTOCOL.md)。
 - `metadata` 响应始终 `body=null`、`raw=null`；`content` 只返回建库时已捕获的内容，未捕获仍为 `null`。
 - content 模式对常见凭据和敏感字段脱敏；超大字符串以 `content_ref`（绝对路径、`bytes`、`sha256`）返回，不截断。客户端必须校验引用后再读取，不能把引用当作普通正文。
 - `GET` 幂等，不推进服务端或消费方进度。相同范围可重试，没有“确认收货”副作用。
 - `has_more=true` 时消费方立即用 `next_cursor` 续取；追平后按自身空闲间隔轮询。
 - 空页可因删除标记或已有事件被删而跨过序号；`archive_seq` 允许空洞。
 - 单页最多 1000 条（事件和启用时的移除标记合计），序列化后上限 32 MiB。若超限，请求以 413 `PAGE_TOO_LARGE` 失败且不返回半页；消费方应减小 `page_size` / `limit` 后重试同一游标。
-- 归档内所有项目共用一条序列。客户端必须被授权读取页内全部项目；Knowledge 遇到未授权项目整页拒绝。当前没有按项目过滤的流；窄范围使用独立归档。
+- 归档内所有项目共用一条序列；API token 只限制视图，不限制项目。需要让客户端只能读取特定项目时，使用独立归档；消费侧过滤不能替代 Trace 的访问隔离。
 - 游标超出归档历史或归档身份变化时返回错误，不返回空页伪装“已追平”。消费方不得自动把游标归零。
 
 ## `GET /v1/status`
@@ -171,6 +171,6 @@ CLI `export --view ... --output FILE` 继续保留，文件仍为同一 v1 批�
 
 尚未实现或未验证：
 
-- 按项目过滤的独立事件流；当前授权仍要求消费方能读取整页所有项目。
+- 按项目过滤或授权的独立事件流。
 - 浏览器前端、UI 集成、非回环访问和多用户认证。
 - 大规模真实历史负载与长时间运行；端到端测试使用回环地址、临时库和合成日志。

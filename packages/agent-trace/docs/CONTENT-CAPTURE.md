@@ -1,6 +1,6 @@
 # 正文归档（content 捕获）
 
-正文归档用于执行复盘、证据检索与后续经验提炼。它只属于 Trace 的 content 捕获模式，默认的 metadata 模式不受影响；升级代码不会自动补回历史正文。协议细节见 [v1 协议](protocol.md)，服务配置见[服务配置](service-config.md)。
+正文归档用于执行复盘、证据检索与后续经验提炼。它只属于 Trace 的 content 捕获模式，默认的 metadata 模式不受影响；升级代码不会自动补回历史正文。协议细节见 [v1 协议](PROTOCOL.md)，服务配置见[服务配置](SERVICE-CONFIG.md)。
 
 ## 边界
 
@@ -77,10 +77,7 @@
 
 ## 消费方
 
-- **Agent Stats**：只拉 `metadata`，导出与 API 固定把 `body` / `raw` 置空；即便归档是 content 模式，统计库也不会得到正文、脱敏标记或 blob 路径。
-- **Agent Knowledge**：拉 `content`。除原有 owner / project 范围、来源引用和原文读取外，还接受 `content_ref`：校验路径为绝对路径、`bytes` 为非负整数、`sha256` 为 64 位十六进制、`media_type` 为 `text/plain`，并要求 `body` 与 `raw` 的引用一致。检索文本仍来自 `body`，因此大输出按引用路径可检索，正文需按引用读取文件并校验哈希。知识库不复制 blob，也不读取任意路径。
-- **Agent Journal**：按日拉取 `content` 增量生成日报；证据与日报产物留在 Journal 自己的数据库和输出目录，不与 Stats / Knowledge 共享游标。
-- 各消费方都必须以 `archive_id` 区分内容库与元数据库，不能混用游标。删除墓碑仍会清除证据投影与统计会话，Trace 侧同时删除 blob。
+Trace 的 metadata 输出不含 `body` / `raw`，content 输出可能包含正文或 `content_ref`。各消费方的接入、授权、游标与删除传播规则见[Trace 消费方部署](../../../docs/TRACE-CONSUMERS.md)。
 
 ## 配置与启动
 
@@ -91,8 +88,7 @@
 - 每个来源的 `projects[].cwd_allowlist` 明确列出允许的项目目录，不写整个 home 或 `/`。
 - 首次回补用 `backfill: "all"`，之后改回 `"none"`；回补前确认磁盘、隐私与保留期。
 - 给已有 content 库增加项目范围时，先改配置并重启 content `serve`。如果 `backfill: "none"` 已把旧文件记为基线，新范围内的旧文件不会自动回补；需要对选定文件显式导入，或临时使用 `backfill: "all"` 完成一次回补后改回 `"none"`。
-- 同步修改消费方的项目授权：Stats 正文查看从 content 配置派生项目范围；Knowledge 必须把新项目加入 `allowed_project_ids`，否则 follow 会以 `FORBIDDEN` 退出。
-- API 客户端沿用 `token_sha256`；Knowledge 只授权 `content`，Stats 只授权 `metadata`；需要同时读两个归档时使用不同配置与游标。
+- API 客户端沿用 `token_sha256`；按所需访问范围授权，并为不同归档分别配置消费进度。消费方项目授权见[Trace 消费方部署](../../../docs/TRACE-CONSUMERS.md)。
 
 启动前只做校验，不建库、不扫描：
 
@@ -122,29 +118,7 @@ npm run cli -- gc --config ~/.local/share/agent-observatory/agent-trace/content.
 
 ## 常驻运行（macOS launchd）
 
-**仅源码仓库提供安装器，发行包不包含该脚本。** 安装器使用隔离的登录项和状态路径，不自动读取其他配置；显式传入其他配置会操作该配置指向的数据。
-
-| 登录项 | 作用 | 默认日志目录 |
-| --- | --- | --- |
-| `local.agent-observatory.trace-content` | Trace content `serve` | `~/.local/share/agent-observatory/agent-trace/` |
-| `local.agent-observatory.knowledge-follow` | Knowledge `follow` | `~/.local/share/agent-observatory/agent-knowledge/` |
-
-```sh
-npm run install:content -- --dry-run
-npm run install:content -- --apply   # 确认隔离配置后才执行
-npm run install:content -- --uninstall --apply
-```
-
-安装、卸载均需 `--apply`，与 `--dry-run` 互斥；预览不读取配置或 token、不启动子进程或 launchctl。默认配置 `~/.local/share/agent-observatory/agent-trace/content.json`、令牌同目录 `content.token`、Knowledge follow 配置 `~/.local/share/agent-observatory/agent-knowledge/content.follow.json`；Knowledge 源码默认同级 `../agent-knowledge`。可用 `--config`、`--token-file`、`--knowledge-follow`、`--knowledge-dir`、`--no-knowledge` 覆盖。
-
-行为与边界：
-
-- 安装器不会替你开启采集：配置必须已是 `capture_mode: "content"` 且 `collection.enabled = true`；不满足就报错退出。
-- 安装顺序为“校验配置和必要凭证 → 创建隔离状态目录和日志 → 停止隔离任务 → `gc` → 写入 plist → bootstrap”。先停再回收，避免删除正在写入的 blob；`gc` 失败则中止安装。配置可能显式指向非隔离库或 blob，操作前必须人工核对。
-- 两个任务都是 `RunAtLoad` + `KeepAlive` + `ThrottleInterval=30`；崩溃后由 launchd 重启，重启会重新获取采集租约、从已提交游标继续。
-- Knowledge follow 的明文 token 只写进其 plist 的 `EnvironmentVariables`（plist `0600`），不写入日志；Trace 侧配置只保存 `token_sha256`。`--dry-run` 不读取令牌文件。
-- 常驻不改变协议：仍是单归档租约、单 worker、按 `archive_id` 独立游标；Stats 继续只读 metadata。
-- 首次回补仍是显式动作。已回补过的库把 `collection.backfill` 改回 `"none"`，否则每次启动都会重扫全部历史（去重后事件不重复，但会浪费时间）。
+仅源码仓库提供安装器，发行包不包含该脚本。预览、可选 Knowledge worker、安装 / 卸载授权及数据隔离注意事项见[根安全说明](../../../docs/SAFETY.md#trace-content-与可选-knowledge-worker-的-macos-源码部署)。
 
 ## 当前限制
 

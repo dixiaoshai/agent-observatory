@@ -30,7 +30,7 @@ BINARY_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.woff', 
 SYNTHETIC = {
     # Intentional rejected URL in config tests and documentation placeholder.
     ('packages/agent-journal/tests/config.test.ts', 'url credentials'): {'http://' + 'user:pass@127.0.0.1'},
-    ('packages/agent-trace/docs/content-capture.md', 'url credentials'): {'https://' + 'user:password@host'},
+    ('packages/agent-trace/docs/CONTENT-CAPTURE.md', 'url credentials'): {'https://' + 'user:password@host'},
     # Deliberately fake redaction-test token; no blanket fixture exemptions.
     ('packages/agent-trace/tests/content.test.ts', 'github token'): {'ghp_' + 'synthetic' + '0' * 24},
 }
