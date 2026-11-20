@@ -2,6 +2,7 @@
 import json
 import re
 import threading
+from collections import OrderedDict
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -33,6 +34,13 @@ CAPABILITIES = {
 
 
 _OVERVIEW_TURN_DETAILS = ('tools', 'evidence', 'usage_records')
+_OVERVIEW_CACHE_LIMIT = 8
+
+
+def _json_body(data):
+    if isinstance(data, (dict, list)):
+        return json.dumps(data, ensure_ascii=False, allow_nan=False).encode()
+    return data
 
 
 def _tool_output_bytes(turn):
@@ -82,6 +90,32 @@ def make_server(store, paths, port=8765, instance="local", archive_only=False, c
         "warnings": ["归档只读模式：本次刷新未读取 Codex 源日志，仅重新读取已接收的数据。"],
         "mode": "archive_only",
     }
+    # Empty until a store reports its database file; stub stores stay uncached.
+    overview_cache = OrderedDict()
+
+    def database_version():
+        path = getattr(store, 'path', None)
+        if path is None:
+            return None
+        try:
+            stat = Path(path).stat()
+        except OSError:
+            return None
+        return (stat.st_mtime_ns, stat.st_size)
+
+    def overview_body(params):
+        """Serialize one overview response, reusing it while the database is unchanged."""
+        version = database_version()
+        key = None if version is None else (version, tuple(sorted(params.items())))
+        if key is not None and key in overview_cache:
+            overview_cache.move_to_end(key)
+            return overview_cache[key]
+        body = _json_body(project_overview(store.query(params)))
+        if key is not None:
+            overview_cache[key] = body
+            while len(overview_cache) > _OVERVIEW_CACHE_LIMIT:
+                overview_cache.popitem(last=False)
+        return body
 
     class Handler(BaseHTTPRequestHandler):
         def setup(self):
@@ -92,7 +126,7 @@ def make_server(store, paths, port=8765, instance="local", archive_only=False, c
             pass  # Never print source paths, query strings, or payloads.
 
         def respond(self, status, data, content_type="application/json; charset=utf-8"):
-            body = json.dumps(data, ensure_ascii=False, allow_nan=False).encode() if isinstance(data, (dict, list)) else data
+            body = _json_body(data)
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
@@ -122,7 +156,7 @@ def make_server(store, paths, port=8765, instance="local", archive_only=False, c
             try:
                 with lock:
                     if url.path == "/api/overview":
-                        result = project_overview(store.query(params))
+                        result = overview_body(params)
                     elif url.path == "/api/session":
                         result = store.detail(params.get("id", ""), params)
                         if result is None:

@@ -1,7 +1,11 @@
 import json
+import os
 import re
+import tempfile
 import threading
+import time
 import unittest
+from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -129,6 +133,69 @@ class OverviewProjectionTests(unittest.TestCase):
         self.assertEqual(project_overview({"error": "x"}), {"error": "x"})
         self.assertEqual(project_overview({"turns": "bad"}), {"turns": "bad"})
         self.assertEqual(project_overview({"turns": ["raw"]})["turns"], ["raw"])
+
+
+class CountingStore:
+    """Counts query calls and reports an optional database file for cache keys."""
+
+    def __init__(self, path=None):
+        self.path = path
+        self.calls = 0
+        self.lock = threading.Lock()
+
+    def query(self, filters):
+        with self.lock:
+            self.calls += 1
+            calls = self.calls
+        return {"filters": filters, "summary": {"sessions": calls}, "turns": []}
+
+    def detail(self, identity, filters=None):
+        return {"session": {"id": identity}, "turns": []}
+
+    def import_paths(self, paths, instance):
+        return {"paths": paths, "instance": instance}
+
+
+class OverviewCacheTests(unittest.TestCase):
+    def serve(self, store):
+        server = make_server(store, [], 0, archive_only=True)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return "http://127.0.0.1:%s" % server.server_port
+
+    def fetch(self, base, query):
+        with urlopen(base + "/api/overview?" + query, timeout=3) as response:
+            return response.status, json.loads(response.read())
+
+    def test_reuses_response_until_database_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "stats.sqlite3"
+            database.write_text("db", encoding="utf-8")
+            store = CountingStore(database)
+            base = self.serve(store)
+            status, first = self.fetch(base, "model=a")
+            self.assertEqual(status, 200)
+            _, second = self.fetch(base, "model=a")
+            self.assertEqual(store.calls, 1)
+            self.assertEqual(second, first)
+            _, other = self.fetch(base, "model=b")
+            self.assertEqual(store.calls, 2)
+            self.assertNotEqual(other["summary"], first["summary"])
+            stamp = time.time_ns() + 10_000_000
+            os.utime(database, ns=(stamp, stamp))
+            _, refreshed = self.fetch(base, "model=a")
+            self.assertEqual(store.calls, 3)
+            self.assertEqual(refreshed["summary"]["sessions"], 3)
+
+    def test_store_without_a_database_file_is_never_cached(self):
+        store = CountingStore(None)
+        base = self.serve(store)
+        self.fetch(base, "model=a")
+        self.fetch(base, "model=a")
+        self.assertEqual(store.calls, 2)
 
 
 if __name__ == "__main__":

@@ -29,13 +29,24 @@ import {
 type Unit = 'turns' | 'sessions';
 type Sort = 'time' | 'tokens' | 'turns' | 'cost' | 'cache';
 
+/** Delay expensive filtering until typing pauses; the input itself stays immediate. */
+function useDebouncedValue<T>(value: T, delay = 250): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return debounced;
+}
+
 export function Sessions({ data, onSelect }: { data: Overview; onSelect: (s: Selection) => void }) {
   const [unit, setUnit] = useState<Unit>('sessions');
   const [sort, setSort] = useState<Sort>('time');
   const [search, setSearch] = useState('');
+  const appliedSearch = useDebouncedValue(search.trim());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const rows = useMemo(() => {
-    const query = search.trim().toLocaleLowerCase();
+    const query = appliedSearch.toLocaleLowerCase();
     if (unit === 'sessions') {
       const promptMatches = new Set(
         data.turns
@@ -64,14 +75,14 @@ export function Sessions({ data, onSelect }: { data: Overview; onSelect: (s: Sel
       )
       .slice()
       .sort((a, b) => compare(a, b, sort));
-  }, [data, unit, sort, search]);
+  }, [data, unit, sort, appliedSearch]);
   // The session row prompt is the first turn's prompt, not the first sorted row.
   const firstTurns = useMemo(() => firstTurnsBySession(data.turns), [data.turns]);
   const turnTree = useMemo(
     () =>
       buildTurnTree(
         data.turns.slice().sort((a, b) => compare(a, b, sort)),
-        search.trim()
+        appliedSearch
           ? new Set(
               unit === 'sessions'
                 ? data.turns
@@ -81,7 +92,7 @@ export function Sessions({ data, onSelect }: { data: Overview; onSelect: (s: Sel
             )
           : undefined,
       ),
-    [data.turns, rows, unit, sort, search],
+    [data.turns, rows, unit, sort, appliedSearch],
   );
   const allTurnEntries = useMemo(() => flattenTurns(turnTree), [turnTree]);
   const rootsBySession = useMemo(() => {
@@ -100,9 +111,9 @@ export function Sessions({ data, onSelect }: { data: Overview; onSelect: (s: Sel
     // Search keeps matching sessions plus their ancestor context visible.
     return buildSessionTree(
       sessions,
-      search.trim() ? new Set(rows.map((row) => row.id)) : undefined,
+      appliedSearch ? new Set(rows.map((row) => row.id)) : undefined,
     );
-  }, [data.sessions, unit, rows, sort, search]);
+  }, [data.sessions, unit, rows, sort, appliedSearch]);
   const allSessionNodes = useMemo(() => {
     const nodes: SessionNode<Session>[] = [];
     const pending = [...sessionTree];
@@ -123,7 +134,7 @@ export function Sessions({ data, onSelect }: { data: Overview; onSelect: (s: Sel
   );
   const visibleTurnEntries = useMemo(() => flattenTurns(turnTree, expanded), [turnTree, expanded]);
   useEffect(() => {
-    if (!search.trim()) return;
+    if (!appliedSearch) return;
     // Keep matching descendants visible together with their ancestor context.
     setExpanded(
       (previous) =>
@@ -135,7 +146,7 @@ export function Sessions({ data, onSelect }: { data: Overview; onSelect: (s: Sel
             .map(({ node }) => node.turn.id),
         ]),
     );
-  }, [search, allSessionNodes, allTurnEntries]);
+  }, [appliedSearch, allSessionNodes, allTurnEntries]);
 
   return (
     <section className="view">
@@ -196,7 +207,7 @@ export function Sessions({ data, onSelect }: { data: Overview; onSelect: (s: Sel
         </>
         <span className="muted" id="row-count">
           {unit === 'sessions'
-            ? `${sessionRowTotal} 组 · ${rows.length} 个${search.trim() ? '匹配' : ''}会话`
+            ? `${sessionRowTotal} 组 · ${rows.length} 个${appliedSearch ? '匹配' : ''}会话`
             : `${rows.length} 条`}{' '}
           · 当前样本 {data.summary.token_samples}/{data.summary.turns} 轮有用量
         </span>
