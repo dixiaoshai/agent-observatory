@@ -134,7 +134,7 @@ python3 -m venv .venv
 
 | 接口 | 行为 |
 | --- | --- |
-| `GET /api/overview` | 同口径的 summary、sessions、turns、模型分组、每日趋势、coverage、warnings、last_import |
+| `GET /api/overview` | 同口径的 summary、sessions、turns、模型分组、每日趋势、coverage、warnings、last_import；turns 只带 `tools_count` 与 `tool_output_bytes` 聚合 |
 | `GET /api/session?id=...` | 指定带命名空间的会话及轮次、工具和事件定位 |
 | `GET /api/session-content?id=...` | 按需只读 Trace 正文；可选 native `turn_id`、`after`（默认 0）、`limit`（默认 50，最多 100）；续页传回 `archive_id` 与 `revision`，已加载内容变更时返回 409 要求重载 |
 | `GET /api/session-content/blob?id=...&event_id=...&pointer=...` | 读取当前会话事件 body 中 JSON pointer 指向的外置正文，校验固定目录、常规文件、大小与 SHA-256；不接受浏览器文件路径，最多 16 MiB |
@@ -142,6 +142,7 @@ python3 -m venv .venv
 | `POST /api/refresh` | Content-Type 必须为 `application/json`；请求体可用 `{}`；仅刷新服务启动时配置的路径 |
 
 - overview / session 接受 `start`、`end`、`project`、`model`、`source` 查询参数；项目、模型与来源精确匹配，来源取会话的 `source` 值（原生 Codex 为 `codex`，Trace 适配为 `pi` / `dsh`，自定义来源为 provider 声明值）。详情接收与总览相同的已归一化筛选范围。
+- overview 的 turns 不下发整轮的 `tools` / `evidence` / `usage_records` 数组，只给 `tools_count` 与 `tool_output_bytes`（所有工具输出大小都已观察时求和，否则为未知）；详情接口保留完整记录。
 - 不存在身份返回 404；无效时间 / 窗口 / 参数返回 400；`/api/refresh` 非 JSON 返回 415、请求体过大返回 413；正文归档变更冲突返回 409；外部正文路径越界返回 403。
 - 错误 JSON 为 `{"error":"说明"}`。静态资源只托管入口页与 `/assets/` 下带内容哈希的 JS / CSS；没有 marker / compare 等优化比对接口。
 

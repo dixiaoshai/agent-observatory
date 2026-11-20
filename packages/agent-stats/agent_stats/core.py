@@ -13,6 +13,9 @@ from .usage import aggregate_cache, quarantine_request_totals
 
 SCHEMA_VERSION = 1
 
+_CORRUPTED_SESSION_WARNING = '数据库中有损坏的规范化会话，已跳过'
+_LEGACY_PROJECTION_WARNING = '旧 pi/dsh 用量投影缺少逐调用事实，仅保留观测小计；请在新归档和新消费者库重建。'
+
 
 def _sum_known(turns):
     vals = [t['token_total'] for t in turns if t.get('token_total') is not None]
@@ -184,25 +187,36 @@ class Store:
         self.db.commit()
         return report
 
+    def _normalized_session(self, body):
+        """Decode one stored session body, quarantining legacy projections."""
+        try:
+            data = json.loads(body)
+        except (ValueError, TypeError):
+            return None, False
+        if (not isinstance(data, dict) or not isinstance(data.get('id'), str)
+                or not isinstance(data.get('turns'), list)
+                or any(not isinstance(t, dict) or not isinstance(t.get('tools'), list) or 'token_total' not in t for t in data['turns'])):
+            return None, False
+        quarantined = False
+        if (data.get('source') in ('pi', 'dsh') and data.get('source_path')
+                and data.get('usage_projection_version') != 2):
+            # Query-time quarantine, not an automatic database migration.
+            # Old projections have already discarded per-record presence.
+            for turn in data['turns']:
+                quarantine_request_totals(turn)
+            quarantined = True
+        return data, quarantined
+
     def _all(self):
         sessions, warnings = [], []
-        for key, body in self.db.execute('SELECT key,body FROM sessions ORDER BY key'):
-            try:
-                data = json.loads(body)
-                if (not isinstance(data, dict) or not isinstance(data.get('id'), str)
-                        or not isinstance(data.get('turns'), list)
-                        or any(not isinstance(t, dict) or not isinstance(t.get('tools'), list) or 'token_total' not in t for t in data['turns'])):
-                    raise ValueError()
-                if (data.get('source') in ('pi', 'dsh') and data.get('source_path')
-                        and data.get('usage_projection_version') != 2):
-                    # Query-time quarantine, not an automatic database migration.
-                    # Old projections have already discarded per-record presence.
-                    warnings.append('旧 pi/dsh 用量投影缺少逐调用事实，仅保留观测小计；请在新归档和新消费者库重建。')
-                    for turn in data['turns']:
-                        quarantine_request_totals(turn)
-                sessions.append(data)
-            except (ValueError, TypeError):
-                warnings.append('数据库中有损坏的规范化会话，已跳过')
+        for _key, body in self.db.execute('SELECT key,body FROM sessions ORDER BY key'):
+            data, quarantined = self._normalized_session(body)
+            if data is None:
+                warnings.append(_CORRUPTED_SESSION_WARNING)
+                continue
+            if quarantined:
+                warnings.append(_LEGACY_PROJECTION_WARNING)
+            sessions.append(data)
         return sessions, warnings
 
     def query(self, filters=None):
@@ -276,12 +290,24 @@ class Store:
                 'warnings': list(dict.fromkeys(warnings)), 'filters': f, 'last_import': report}
 
     def detail(self, session_id, filters=None):
-        sessions, warnings = self._all()
-        s = next((s for s in sessions if s['id'] == session_id), None)
-        if not s:
+        # Read only the requested session and, when needed, its direct parent:
+        # decoding the whole archive for one dialog made every open multi-second.
+        row = self.db.execute('SELECT body FROM sessions WHERE key=?', (session_id,)).fetchone()
+        if not row:
             return None
+        s, quarantined = self._normalized_session(row[0])
+        if s is None:
+            return None
+        warnings = [_LEGACY_PROJECTION_WARNING] if quarantined else []
         f = _filters(filters)
-        sessions_by_id = {row['id']: row for row in sessions}
+        sessions_by_id = {s['id']: s}
+        parent_id = s.get('parent_id')
+        if isinstance(parent_id, str) and parent_id and parent_id != s['id']:
+            parent_row = self.db.execute('SELECT body FROM sessions WHERE key=?', (parent_id,)).fetchone()
+            if parent_row:
+                parent, _ = self._normalized_session(parent_row[0])
+                if parent is not None:
+                    sessions_by_id[parent_id] = parent
         turns = [estimate_turn(dict(t, sequence=t.get('sequence') or sequence, **_parent_turn_fields(t, s, sessions_by_id), **_account_scope(s))) for sequence, t in enumerate(s['turns'], 1) if _matches(t, s, f)]
         return {'session': {**{k: v for k, v in s.items() if k != 'turns'}, **aggregate_cost(turns),
                             'cache_usage': aggregate_cache(turns)},

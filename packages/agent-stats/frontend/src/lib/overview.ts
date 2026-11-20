@@ -36,8 +36,10 @@ export function statistics(values: (Metric | undefined)[]) {
 export type ConcentrationMetric = 'cost' | 'tokens' | 'toolBytes';
 
 export function toolOutputBytes(turn: Turn): Metric {
-  if (!turn.tools.length || !turn.tools.every((tool) => count(tool.output_bytes))) return null;
-  return turn.tools.reduce((total, tool) => total + (tool.output_bytes ?? 0), 0);
+  if (turn.tool_output_bytes !== undefined) return turn.tool_output_bytes;
+  const tools = turn.tools ?? [];
+  if (!tools.length || !tools.every((tool) => count(tool.output_bytes))) return null;
+  return tools.reduce((total, tool) => total + (tool.output_bytes ?? 0), 0);
 }
 
 export function rankConcentration(turns: Turn[], metric: ConcentrationMetric) {

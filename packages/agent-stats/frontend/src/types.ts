@@ -85,8 +85,11 @@ export interface Turn {
   cost_basis?: 'recorded' | 'estimated' | 'mixed' | 'free' | null;
   cost_source?: 'provider' | 'model_rates' | 'mixed' | 'free_waiver' | null;
   recorded_cost_usd?: Metric;
-  tools: ToolRecord[];
-  evidence: Evidence[];
+  /** Aggregates carried by /api/overview; /api/session keeps the full arrays. */
+  tools_count?: number;
+  tool_output_bytes?: Metric;
+  tools?: ToolRecord[];
+  evidence?: Evidence[];
   attribution: string;
 }
 export interface Session {

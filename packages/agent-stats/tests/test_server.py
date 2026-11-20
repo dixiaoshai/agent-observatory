@@ -5,13 +5,17 @@ import unittest
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from agent_stats.server import make_server
+from agent_stats.server import make_server, project_overview
 
 
 class StubStore:
     def query(self, filters):
         if filters.get("start") == "bad":
             raise ValueError("无效时间")
+        if filters.get("project") == "with-turns":
+            return {"filters": filters, "summary": {"tool_calls": 1}, "turns": [
+                {"id": "t1", "tools": [{"call_id": "a", "output_bytes": 4}],
+                 "evidence": [{"line": 2}], "usage_records": [{"usage": {}}]}]}
         return {"filters": filters, "summary": {"token_total": None}}
 
     def detail(self, identity, filters=None):
@@ -78,6 +82,53 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(self.request("/../README.md")[0], 404)
         self.assertEqual(self.request("/assets/../../README.md")[0], 404)
         self.assertEqual(self.request("/assets/missing.js")[0], 404)
+
+
+    def test_overview_projects_turn_execution_detail(self):
+        status, _, body = self.request("/api/overview?project=with-turns")
+        self.assertEqual(status, 200)
+        turn = json.loads(body)["turns"][0]
+        self.assertEqual(turn["tools_count"], 1)
+        self.assertEqual(turn["tool_output_bytes"], 4)
+        self.assertNotIn("tools", turn)
+        self.assertNotIn("evidence", turn)
+        self.assertNotIn("usage_records", turn)
+
+
+class OverviewProjectionTests(unittest.TestCase):
+    def test_keeps_counts_and_known_tool_output_bytes(self):
+        result = {"summary": {"turns": 1}, "turns": [{
+            "id": "known", "token_total": 10,
+            "tools": [{"call_id": "a", "output_bytes": 5}, {"call_id": "b", "output_bytes": 7}],
+            "evidence": [{"line": 3}], "usage_records": [{"usage": {"input_tokens": 4}}]}]}
+        projected = project_overview(result)
+        turn = projected["turns"][0]
+        self.assertEqual(projected["summary"], {"turns": 1})
+        self.assertEqual(turn["token_total"], 10)
+        self.assertEqual(turn["tools_count"], 2)
+        self.assertEqual(turn["tool_output_bytes"], 12)
+        self.assertNotIn("tools", turn)
+        self.assertNotIn("evidence", turn)
+        self.assertNotIn("usage_records", turn)
+        self.assertEqual(result["turns"][0]["tools"][0]["call_id"], "a")
+
+    def test_unknown_or_empty_tool_sizes_stay_unknown(self):
+        turns = [
+            {"id": "unknown", "tools": [{"output_bytes": 5}, {"output_bytes": None}]},
+            {"id": "empty", "tools": []},
+            {"id": "missing"},
+            {"id": "boolean", "tools": [{"output_bytes": True}]},
+        ]
+        projected = project_overview({"turns": turns})
+        for turn in projected["turns"]:
+            self.assertIsNone(turn["tool_output_bytes"])
+        self.assertEqual([turn["tools_count"] for turn in projected["turns"]], [2, 0, 0, 1])
+
+    def test_non_overview_payloads_pass_through(self):
+        self.assertIsNone(project_overview(None))
+        self.assertEqual(project_overview({"error": "x"}), {"error": "x"})
+        self.assertEqual(project_overview({"turns": "bad"}), {"turns": "bad"})
+        self.assertEqual(project_overview({"turns": ["raw"]})["turns"], ["raw"])
 
 
 if __name__ == "__main__":

@@ -100,3 +100,11 @@ test('tool-byte concentration excludes unavailable outputs and never converts by
   assert.equal(rank.rows[0].turn.id, 'a');
   assert.equal(rank.share, 0.75);
 });
+
+test('overview aggregates replace the per-turn tool array', () => {
+  assert.equal(toolOutputBytes(turn({ tools: undefined, tool_output_bytes: 0 })), 0);
+  assert.equal(toolOutputBytes(turn({ tools: undefined, tool_output_bytes: null })), null);
+  assert.equal(toolOutputBytes(turn({ tools: undefined, tool_output_bytes: 42 })), 42);
+  // Detail responses keep the full array and stay supported.
+  assert.equal(toolOutputBytes(turn({ tool_output_bytes: undefined })), null);
+});

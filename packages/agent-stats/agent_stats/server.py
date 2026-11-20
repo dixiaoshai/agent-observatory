@@ -32,6 +32,39 @@ CAPABILITIES = {
 }
 
 
+_OVERVIEW_TURN_DETAILS = ('tools', 'evidence', 'usage_records')
+
+
+def _tool_output_bytes(turn):
+    """Sum observed tool output sizes; unknown when any size is not observed."""
+    tools = turn.get('tools') or []
+    sizes = [tool.get('output_bytes') if isinstance(tool, dict) else None for tool in tools]
+    if not tools or any(isinstance(size, bool) or not isinstance(size, int) or size < 0 for size in sizes):
+        return None
+    return sum(sizes)
+
+
+def project_overview(result):
+    """Drop per-turn execution detail from the dashboard overview response.
+
+    The overview only needs per-turn counts and aggregates; full tool and
+    evidence arrays stay available through ``/api/session``. Keeping them out of
+    this response removes most of a multi-megabyte payload per refresh.
+    """
+    if not isinstance(result, dict) or not isinstance(result.get('turns'), list):
+        return result
+    turns = []
+    for turn in result['turns']:
+        if not isinstance(turn, dict):
+            turns.append(turn)
+            continue
+        item = {key: value for key, value in turn.items() if key not in _OVERVIEW_TURN_DETAILS}
+        item['tools_count'] = len(turn.get('tools') or [])
+        item['tool_output_bytes'] = _tool_output_bytes(turn)
+        turns.append(item)
+    return dict(result, turns=turns)
+
+
 def make_server(store, paths, port=8765, instance="local", archive_only=False, content_reader=None):
     lock = threading.RLock()
     static = Path(__file__).parent / "static"
@@ -89,7 +122,7 @@ def make_server(store, paths, port=8765, instance="local", archive_only=False, c
             try:
                 with lock:
                     if url.path == "/api/overview":
-                        result = store.query(params)
+                        result = project_overview(store.query(params))
                     elif url.path == "/api/session":
                         result = store.detail(params.get("id", ""), params)
                         if result is None:

@@ -264,9 +264,12 @@ function compare(a: Turn | Session, b: Turn | Session, sort: Sort): number {
       (b.token_total ?? ('token_known' in b ? b.token_known : null) ?? -1) -
       (a.token_total ?? ('token_known' in a ? a.token_known : null) ?? -1)
     );
-  if (sort === 'turns')
-    return ('turns' in b ? b.turns : b.tools.length) - ('turns' in a ? a.turns : a.tools.length);
+  if (sort === 'turns') return toolCount(b) - toolCount(a);
   return String(b.started_at ?? '').localeCompare(String(a.started_at ?? ''));
+}
+
+function toolCount(row: Turn | Session): number {
+  return 'turns' in row ? row.turns : (row.tools_count ?? row.tools?.length ?? 0);
 }
 
 function TurnIdentity({
@@ -628,7 +631,7 @@ function SessionTable({
               </td>
               <td className="muted">—</td>
               <td>
-                {formatNumber(turn.tools.length)}
+                {formatNumber(turn.tools_count ?? turn.tools?.length)}
                 <small className="sub">已观察记录</small>
               </td>
               <td>{turnTokens(turn)}</td>

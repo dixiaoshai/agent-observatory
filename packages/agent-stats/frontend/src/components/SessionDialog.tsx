@@ -170,6 +170,8 @@ function selectedTurns(turns: Turn[], selectedId?: string) {
 }
 
 function TurnDetail({ turn }: { turn: Turn }) {
+  const tools = turn.tools ?? [];
+  const evidence = turn.evidence ?? [];
   const facts: [string, string][] = [
     ['时间', `${formatDate(turn.started_at)} → ${formatDate(turn.ended_at)}`],
     ['模型', turn.model || '未知'],
@@ -233,7 +235,7 @@ function TurnDetail({ turn }: { turn: Turn }) {
         ))}
       </dl>
       <h3 className="tool-heading">工具调用与事件证据</h3>
-      {turn.tools.length ? (
+      {tools.length ? (
         <div className="detail-table-wrap">
           <table>
             <thead>
@@ -244,7 +246,7 @@ function TurnDetail({ turn }: { turn: Turn }) {
               </tr>
             </thead>
             <tbody>
-              {turn.tools.map((tool) => (
+              {tools.map((tool) => (
                 <tr key={tool.call_id}>
                   <td>{tool.name}</td>
                   <td>{tool.call_id}</td>
@@ -267,7 +269,7 @@ function TurnDetail({ turn }: { turn: Turn }) {
       )}
       <details>
         <summary>事件定位（最多 100 条）</summary>
-        {turn.evidence.map((event) => (
+        {evidence.map((event) => (
           <p key={`${event.line}-${event.timestamp}`}>
             第 {event.line} 行 · {formatDate(event.timestamp)}
           </p>

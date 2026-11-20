@@ -130,5 +130,21 @@ class ParentTurnTests(unittest.TestCase):
         self.assertIsNotNone(turns['child-b']['parent_turn_id'])
 
 
+    def test_detail_reads_only_the_requested_session_and_its_parent(self):
+        parent, child = self.sample()
+        self.store.import_paths([parent, child])
+        sessions = {s['native_id']: s for s in self.store.query()['sessions']}
+        self.store.db.execute('INSERT OR REPLACE INTO sessions VALUES(?,?,?)',
+                              (json.dumps(['codex', 'local', 'broken'], separators=(',', ':')), 0,
+                               '{"not": "a normalized session"}'))
+        self.store.db.commit()
+        detail = self.store.detail(sessions['child']['id'])
+        self.assertEqual([t['native_id'] for t in detail['turns']], ['child-a', 'child-b'])
+        # Unrelated corrupt rows no longer leak global warnings into one dialog.
+        self.assertFalse(any('损坏' in warning for warning in detail['warnings']))
+        self.assertTrue(all(t['parent_turn_id'] for t in detail['turns']))
+        self.assertIsNone(self.store.detail('missing'))
+
+
 if __name__ == '__main__':
     unittest.main()
