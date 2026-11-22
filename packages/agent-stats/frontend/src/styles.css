@@ -182,6 +182,20 @@ strong {
   padding: 16px;
   margin-bottom: 12px;
 }
+.journal .panel-head {
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.journal .toolbar {
+  margin-bottom: 16px;
+}
+.journal-report {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.7;
+  font-family: inherit;
+}
 .summary-card {
   min-height: 214px;
   margin-bottom: 0;
@@ -845,6 +859,7 @@ details p {
     max-width: 180px;
   }
   .tabs {
+    flex-wrap: wrap;
     margin-left: -14px;
     margin-right: -14px;
     padding: 0 14px;

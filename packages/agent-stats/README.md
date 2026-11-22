@@ -54,6 +54,16 @@ python3 -m venv .venv
 .venv/bin/agent-stats serve
 ```
 
+## Agent Journal 日报（可选）
+
+在 Stats 目录运行，显式指定已授权的 Journal `output_directory`，只读查看已生成的日报：
+
+```sh
+python3 -m agent_stats serve --archive-only --no-content --journal-dir /path/to/journal-output
+```
+
+打开「Agent Journal 日报」标签，按日期选择已生成的总结，默认显示最新一份。Stats 不生成日报，也不需要安装 Journal。详见[运行说明](docs/RUNNING.md#查看-agent-journal-日报可选)。
+
 ## 任务详情正文下钻（可选）
 
 打开会话或轮次详情，点击“查看执行正文”，按时间线查看用户请求、Agent 回复、最终回答、推理摘要和工具输入输出；工具记录和摘要默认折叠，通过“加载更多”续读，“来源证据”保留事件 ID、源文件及行号。大型外置正文需按需读取，服务端校验目录、文件类型、大小与 SHA-256。

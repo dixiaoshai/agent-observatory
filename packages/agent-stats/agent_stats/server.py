@@ -1,9 +1,12 @@
 """Loopback-only HTTP delivery. No hooks, network clients, or external assets."""
+import errno
 import json
+import os
 import re
+import stat
 import threading
 from collections import OrderedDict
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -73,7 +76,90 @@ def project_overview(result):
     return dict(result, turns=turns)
 
 
-def make_server(store, paths, port=8765, instance="local", archive_only=False, content_reader=None):
+JOURNAL_MAX_BYTES = 2 * 1024 * 1024
+
+
+def _journal_date(value):
+    if not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}', value):
+        return False
+    try:
+        date.fromisoformat(value)
+        return True
+    except ValueError:
+        return False
+
+
+class _JournalDirectory:
+    def __init__(self, directory):
+        self.enabled = directory is not None
+        self.lock = threading.Lock()
+        self.fd = None
+        if self.enabled:
+            try:
+                # Allow a configured symlink at startup, then pin its target.
+                self.fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NONBLOCK)
+            except OSError:
+                pass  # A configured but inaccessible directory remains an error.
+
+    def open(self):
+        with self.lock:
+            if self.fd is None:
+                raise OSError('Journal directory unavailable')
+            # dup() shares directory offsets; open a new file description instead.
+            return os.open('.', os.O_RDONLY | os.O_DIRECTORY | os.O_NONBLOCK, dir_fd=self.fd)
+
+    def close(self):
+        with self.lock:
+            if self.fd is not None:
+                os.close(self.fd)
+                self.fd = None
+
+
+def _journal_response(directory, path, params):
+    day = params.get('date', '')
+    if path.endswith('/day') and not _journal_date(day):
+        return 400, {'error': '无效日期'}
+    if not directory.enabled:
+        return (200, {'enabled': False, 'days': []}) if path.endswith('/days') else (404, {'error': '日报不存在'})
+    try:
+        # Each request owns an independent descriptor rooted at the pinned directory.
+        directory_fd = directory.open()
+        try:
+            if path.endswith('/days'):
+                days = []
+                with os.scandir(directory_fd) as entries:
+                    for entry in entries:
+                        name = entry.name
+                        if name.endswith('.md') and _journal_date(name[:-3]):
+                            try:
+                                if entry.is_file(follow_symlinks=False):
+                                    days.append(name[:-3])
+                            except FileNotFoundError:
+                                pass
+                return 200, {'enabled': True, 'days': sorted(days, reverse=True)}
+            try:
+                fd = os.open(day + '.md', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd)
+            except OSError as exc:
+                if exc.errno in (errno.ENOENT, errno.ELOOP, errno.ENOTDIR):
+                    return 404, {'error': '日报不存在'}
+                raise
+            try:
+                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                    return 404, {'error': '日报不存在'}
+                with os.fdopen(fd, 'rb', closefd=False) as stream:
+                    data = stream.read(JOURNAL_MAX_BYTES + 1)
+                if len(data) > JOURNAL_MAX_BYTES:
+                    return 413, {'error': '日报过大'}
+                return 200, {'date': day, 'markdown': data.decode('utf-8')}
+            finally:
+                os.close(fd)
+        finally:
+            os.close(directory_fd)
+    except (OSError, UnicodeError):
+        return 500, {'error': '日报读取失败，请检查目录与文件权限'}
+
+
+def make_server(store, paths, port=8765, instance="local", archive_only=False, content_reader=None, journal_dir=None):
     lock = threading.RLock()
     static = Path(__file__).parent / "static"
     capabilities = dict(CAPABILITIES)
@@ -154,6 +240,9 @@ def make_server(store, paths, port=8765, instance="local", archive_only=False, c
             url = urlsplit(self.path)
             params = {k: v[-1] for k, v in parse_qs(url.query).items()}
             try:
+                if url.path in ('/api/journal/days', '/api/journal/day'):
+                    status, result = _journal_response(journal, url.path, params)
+                    return self.respond(status, result)
                 with lock:
                     if url.path == "/api/overview":
                         result = overview_body(params)
@@ -216,4 +305,17 @@ def make_server(store, paths, port=8765, instance="local", archive_only=False, c
             except Exception:
                 self.respond(500, {"error": "采集失败，Agent 运行不受影响；请检查源文件与数据库权限"})
 
-    return ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    journal = _JournalDirectory(journal_dir)
+
+    class Server(ThreadingHTTPServer):
+        def server_close(self):
+            try:
+                super().server_close()
+            finally:
+                journal.close()
+
+    try:
+        return Server(("127.0.0.1", port), Handler)
+    except BaseException:
+        journal.close()
+        raise

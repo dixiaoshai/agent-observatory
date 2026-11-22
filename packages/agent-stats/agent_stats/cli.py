@@ -29,6 +29,7 @@ def main(argv=None):
         sub.add_argument("--instance", default="local", help="来源实例命名空间；不同设备使用不同值")
         if command == "serve":
             sub.add_argument("--port", type=int, default=8765)
+            sub.add_argument("--journal-dir", help="显式指定只读 Journal 正式日报目录；默认禁用")
             sub.add_argument("--archive-only", "--no-import", dest="archive_only", action="store_true",
                              help="只消费已接收的归档数据：启动和页面刷新都不读取 Codex 源日志")
             content = sub.add_mutually_exclusive_group()
@@ -109,7 +110,7 @@ def main(argv=None):
                 print(json.dumps(store.import_paths(paths, instance=args.instance), ensure_ascii=False))
             content_path = None if args.no_content else args.content_config or default_content_config()
             server = make_server(store, paths, args.port, args.instance, archive_only=args.archive_only,
-                                 content_reader=ContentReader(content_path))
+                                 content_reader=ContentReader(content_path), journal_dir=args.journal_dir)
             print("Agent Stats: http://127.0.0.1:%s · Ctrl+C 停止" % server.server_port, flush=True)
             try:
                 server.serve_forever()

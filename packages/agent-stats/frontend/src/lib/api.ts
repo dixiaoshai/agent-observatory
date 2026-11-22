@@ -2,6 +2,8 @@ import type {
   Capabilities,
   Filters,
   ImportReport,
+  JournalDay,
+  JournalDays,
   Overview,
   SessionContent,
   SessionDetail,
@@ -61,6 +63,12 @@ export const getContentBlob = (
     `/api/session-content/blob?${query({}, { id, event_id: eventId, pointer })}`,
     { signal },
   );
+
+export const getJournalDays = (signal?: AbortSignal) =>
+  request<JournalDays>('/api/journal/days', { signal });
+
+export const getJournalDay = (date: string, signal?: AbortSignal) =>
+  request<JournalDay>(`/api/journal/day?${query({}, { date })}`, { signal });
 
 export const getCapabilities = (signal?: AbortSignal) =>
   request<Capabilities>('/api/capabilities', { signal });

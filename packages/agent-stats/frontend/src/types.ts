@@ -244,4 +244,12 @@ export interface SessionContent {
   next_cursor: number;
   has_more: boolean;
 }
-export type Page = 'overview' | 'sessions' | 'source';
+export interface JournalDays {
+  enabled: boolean;
+  days: string[];
+}
+export interface JournalDay {
+  date: string;
+  markdown: string;
+}
+export type Page = 'overview' | 'sessions' | 'journal' | 'source';

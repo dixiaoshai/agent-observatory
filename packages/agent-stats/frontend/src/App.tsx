@@ -5,6 +5,7 @@ import { SessionDialog } from './components/SessionDialog';
 import { useStats } from './hooks/useStats';
 import { formatDate, projectName, timeZone } from './lib/format';
 import { pageFromHash, pageHref } from './lib/pageRoute';
+import { Journal } from './pages/Journal';
 import { Overview } from './pages/Overview';
 import { Sessions } from './pages/Sessions';
 import { Source } from './pages/Source';
@@ -21,11 +22,13 @@ const emptyFilters: Filters = {};
 const pages: { id: Page; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'sessions', label: '各轮明细' },
+  { id: 'journal', label: 'Agent Journal 日报' },
   { id: 'source', label: '来源与覆盖' },
 ];
 
 export default function App() {
   const [page, setPage] = useState(() => pageFromHash(window.location.hash));
+  const isStatsPage = page !== 'journal';
   const [controls, setControls] = useState(initialFilters);
   const [selection, setSelection] = useState<Selection | null>(null);
   useEffect(() => {
@@ -59,8 +62,10 @@ export default function App() {
     if (controls.model) result.model = controls.model;
     return result;
   }, [controls]);
-  const { data, error, loading, refreshing, refresh, reload, messages, queryTime } =
-    useStats(filters);
+  const { data, error, loading, refreshing, refresh, reload, messages, queryTime } = useStats(
+    filters,
+    isStatsPage,
+  );
   useEffect(() => {
     if (!data) return;
     setFacets((previous) => ({
@@ -94,24 +99,28 @@ export default function App() {
             <h1>Agent token stats</h1>
             <p>Codex / pi / dsh · 本地会话数据 · 手动刷新采集 · 仅 127.0.0.1</p>
           </div>
-          <div className="header-actions">
-            <button onClick={() => void refresh()} disabled={refreshing}>
-              {refreshing ? '正在采集…' : '刷新采集'}
-            </button>
-            <span className="updated">
-              {queryTime ? `查询于 ${formatDate(queryTime)}` : '等待数据'}
-              <br />
-              {timeZone}
-            </span>
-          </div>
+          {isStatsPage && (
+            <div className="header-actions">
+              <button onClick={() => void refresh()} disabled={refreshing}>
+                {refreshing ? '正在采集…' : '刷新采集'}
+              </button>
+              <span className="updated">
+                {queryTime ? `查询于 ${formatDate(queryTime)}` : '等待数据'}
+                <br />
+                {timeZone}
+              </span>
+            </div>
+          )}
         </header>
-        <FiltersBar
-          value={controls}
-          sources={facets.sources}
-          projects={facets.projects}
-          models={facets.models}
-          onChange={setControls}
-        />
+        {isStatsPage && (
+          <FiltersBar
+            value={controls}
+            sources={facets.sources}
+            projects={facets.projects}
+            models={facets.models}
+            onChange={setControls}
+          />
+        )}
         <nav className="tabs" aria-label="分析页面">
           {pages.map((item) => (
             <a
@@ -124,18 +133,18 @@ export default function App() {
             </a>
           ))}
         </nav>
-        {error && (
+        {isStatsPage && error && (
           <div className="notice" role="alert">
             数据请求失败：{error} <button onClick={reload}>重新查询</button>
             {data && <p>当前仍显示上一次成功查询的结果。</p>}
           </div>
         )}
-        {loading && (
+        {isStatsPage && loading && (
           <p className="loading-state" role="status">
             {data ? '正在更新筛选结果，暂显示上次查询数据…' : '正在读取本机统计数据…'}
           </p>
         )}
-        {warnings.length > 0 && (
+        {isStatsPage && warnings.length > 0 && (
           <details className="notice">
             <summary>{warnings.length} 条数据提醒 · 查看采集或覆盖说明</summary>
             <ul>
@@ -145,7 +154,9 @@ export default function App() {
             </ul>
           </details>
         )}
-        {page === 'source' ? (
+        {page === 'journal' ? (
+          <Journal />
+        ) : page === 'source' ? (
           <Source />
         ) : data ? (
           <section className="view" aria-busy={loading}>

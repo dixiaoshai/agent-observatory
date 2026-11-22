@@ -6,6 +6,7 @@ test('each dashboard page has a distinct URL fragment that resolves back to it',
   assert.deepEqual(pageHref, {
     overview: '#/overview',
     sessions: '#/sessions',
+    journal: '#/journal',
     source: '#/source',
   });
   for (const [page, href] of Object.entries(pageHref)) {

@@ -27,6 +27,18 @@ python3 -m agent_stats --db .agent-stats/stats.sqlite3 serve --source ~/.codex/s
 - `--port` 可修改端口；服务仅绑定 IPv4 回环地址。
 - `--archive-only`（别名 `--no-import`）只消费已接收数据：启动和页面刷新都不读取源日志，`POST /api/refresh` 返回 `mode=archive_only` 的说明报告。
 
+## 查看 Agent Journal 日报（可选）
+
+在 Stats 目录运行，显式指定已授权的 Journal `output_directory` 作为只读目录：
+
+```bash
+python3 -m agent_stats serve --archive-only --no-content --journal-dir /path/to/journal-output
+```
+
+「Agent Journal 日报」标签按日期选择，默认最新，可重新读取，不受 Stats 筛选影响。Stats 以纯文本展示 Markdown 原文，不读取 Journal 数据库或预览，不调用模型，也不生成日报。未配置不影响 Stats。
+
+日报功能使用 macOS / Linux 的目录文件描述符：Stats 启动时打开指定目录，目录当时不可访问或后来被整体替换时，需要重启 Stats。只接受该目录下名为 `YYYY-MM-DD.md` 的普通文件，不跟随日报文件的符号链接。日报是二手摘要，仍可能包含敏感信息，只配置愿意向本机看板访问者展示的目录。
+
 ## 自动跟随 Trace（可选）
 
 Trace 侧先按[服务配置](../../agent-trace/docs/service-config.md)启动 `serve --config`，为 Stats 客户端只授权 `metadata` 视图，并生成 bearer token。明文 token 只放进环境变量。示例配置见 [agent-stats.follow.example.json](../agent-stats.follow.example.json)：
@@ -148,6 +160,8 @@ python3 -m venv .venv
 | `GET /api/session?id=...` | 指定带命名空间的会话及轮次、工具和事件定位；只读取目标会话及其直接父会话，不扫描整库 |
 | `GET /api/session-content?id=...` | 按需只读 Trace 正文；可选 native `turn_id`、`after`（默认 0）、`limit`（默认 50，最多 100）；续页传回 `archive_id` 与 `revision`，已加载内容变更时返回 409 要求重载 |
 | `GET /api/session-content/blob?id=...&event_id=...&pointer=...` | 读取当前会话事件 body 中 JSON pointer 指向的外置正文，校验固定目录、常规文件、大小与 SHA-256；不接受浏览器文件路径，最多 16 MiB |
+| `GET /api/journal/days` | 返回 `{enabled:boolean,days:string[]}`，日期降序；未配置时 `enabled` 为 `false` |
+| `GET /api/journal/day?date=YYYY-MM-DD` | 返回 `{date:string,markdown:string}`；日期无效返回 400，未配置或日报缺失返回 404，非 UTF-8 或目录不可访问返回通用 500，超过 2 MiB 返回 413 |
 | `GET /api/capabilities` | 接入能力与降级原因 |
 | `POST /api/refresh` | Content-Type 必须为 `application/json`；请求体可用 `{}`；仅刷新服务启动时配置的路径 |
 

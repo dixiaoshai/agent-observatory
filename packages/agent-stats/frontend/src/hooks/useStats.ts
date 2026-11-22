@@ -20,7 +20,7 @@ const initial: StatsState = {
   messages: [],
 };
 const keyOf = (filters: Filters) => JSON.stringify(filters);
-export function useStats(filters: Filters) {
+export function useStats(filters: Filters, enabled: boolean) {
   const [state, setState] = useState<StatsState>(initial);
   const filtersRef = useRef(filters);
   const key = keyOf(filters);
@@ -70,12 +70,13 @@ export function useStats(filters: Filters) {
   }, []);
 
   useEffect(() => {
+    if (!enabled) return;
     void load();
     return () => {
       generation.current++;
       queryController.current?.abort();
     };
-  }, [key, load]);
+  }, [enabled, key, load]);
 
   useEffect(() => {
     mounted.current = true;
