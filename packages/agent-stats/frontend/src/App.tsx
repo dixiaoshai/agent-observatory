@@ -4,6 +4,7 @@ import { FiltersBar, type FilterControls, type ProjectOption } from './component
 import { SessionDialog } from './components/SessionDialog';
 import { useStats } from './hooks/useStats';
 import { formatDate, projectName, timeZone } from './lib/format';
+import { pageFromHash, pageHref } from './lib/pageRoute';
 import { Overview } from './pages/Overview';
 import { Sessions } from './pages/Sessions';
 import { Source } from './pages/Source';
@@ -24,9 +25,19 @@ const pages: { id: Page; label: string }[] = [
 ];
 
 export default function App() {
-  const [page, setPage] = useState<Page>('overview');
+  const [page, setPage] = useState(() => pageFromHash(window.location.hash));
   const [controls, setControls] = useState(initialFilters);
   const [selection, setSelection] = useState<Selection | null>(null);
+  useEffect(() => {
+    const syncPage = () => {
+      const next = pageFromHash(window.location.hash);
+      setPage(next);
+      if (next !== 'sessions') setSelection(null);
+    };
+    window.addEventListener('hashchange', syncPage);
+    syncPage();
+    return () => window.removeEventListener('hashchange', syncPage);
+  }, []);
   const [facets, setFacets] = useState<{
     sources: string[];
     projects: ProjectOption[];
@@ -72,7 +83,7 @@ export default function App() {
   }, [data]);
   const warnings = [...new Set([...(data?.warnings ?? []), ...messages])];
   const select = (next: Selection) => {
-    setPage('sessions');
+    if (window.location.hash !== pageHref.sessions) window.location.hash = pageHref.sessions;
     setSelection(next);
   };
   return (
@@ -103,14 +114,14 @@ export default function App() {
         />
         <nav className="tabs" aria-label="分析页面">
           {pages.map((item) => (
-            <button
+            <a
               key={item.id}
               className={`nav${page === item.id ? ' active' : ''}`}
-              aria-pressed={page === item.id}
-              onClick={() => setPage(item.id)}
+              aria-current={page === item.id ? 'page' : undefined}
+              href={pageHref[item.id]}
             >
               {item.label}
-            </button>
+            </a>
           ))}
         </nav>
         {error && (
@@ -139,7 +150,7 @@ export default function App() {
         ) : data ? (
           <section className="view" aria-busy={loading}>
             {page === 'overview' ? (
-              <Overview data={data} onSelect={select} onSessions={() => setPage('sessions')} />
+              <Overview data={data} onSelect={select} />
             ) : (
               <Sessions data={data} onSelect={select} />
             )}

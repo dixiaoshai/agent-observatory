@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { coverageText } from '../lib/coverage';
+import { pageHref } from '../lib/pageRoute';
 import type { Overview as OverviewData, Selection } from '../types';
 import {
   cacheRate,
@@ -30,11 +31,9 @@ const colors = { input: '#3c6dbb', cached: '#b8c2d1', output: '#8c806b' };
 export function Overview({
   data,
   onSelect,
-  onSessions,
 }: {
   data: OverviewData;
   onSelect: (selection: Selection) => void;
-  onSessions: () => void;
 }) {
   const { summary: s, turns } = data;
   const tokens = statistics(turns.map((t) => t.token_total));
@@ -232,9 +231,9 @@ export function Overview({
         <article className="panel recent-panel">
           <div className="panel-head">
             <h3>最近会话</h3>
-            <button className="text-button" onClick={onSessions}>
+            <a className="text-button" href={pageHref.sessions}>
               查看全部
-            </button>
+            </a>
           </div>
           <div className="table-wrap">
             {!data.sessions.length ? (

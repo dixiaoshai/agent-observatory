@@ -47,6 +47,7 @@ select:disabled {
   opacity: 0.7;
   cursor: default;
 }
+a:focus-visible,
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
@@ -145,6 +146,7 @@ strong {
   border-radius: 0;
   background: transparent;
   color: var(--muted);
+  text-decoration: none;
   padding: 8px 12px;
   min-height: 38px;
   border-bottom: 2px solid transparent;
