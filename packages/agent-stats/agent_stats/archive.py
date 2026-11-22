@@ -290,7 +290,6 @@ def _rebuild(db, archive_id, session_key):
             result[field] = json.dumps([start['runtime'], start['instance_id'], result[field]], ensure_ascii=False, separators=(',', ':'))
     for turn in result['turns']:
         turn['native_id'], turn['id'] = turn['id'], json.dumps([session_key, turn['id']], ensure_ascii=False, separators=(',', ':'))
-    result['project_name'] = start['project_id']
     result['title'] = _display_title(events, start['data'].get('title'))
     result['source_path'] = start['source']['path']
     result['received_at'] = datetime.now(timezone.utc).isoformat()

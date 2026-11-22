@@ -7,7 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .codex import parse_rollout, timestamp
-from .codex_metadata import metadata_home, project_name, read_project_metadata, read_session_titles
+from .codex_metadata import archived_project_name, metadata_home, project_name, read_project_metadata, read_session_titles
+from .dsh_metadata import archived_workspace_name, read_workspace_metadata
 from .pricing import PRICING, aggregate_cost, estimate_turn
 from .usage import aggregate_cache, quarantine_request_totals
 
@@ -86,9 +87,19 @@ def _account_scope(session):
     return {'account_scoped': True} if session.get('account_scoped') is True else {}
 
 
+def _workspace_home(explicit, env, default, enabled):
+    if explicit is None and not enabled:
+        return None
+    return Path(explicit if explicit is not None else os.environ.get(env) or Path.home() / default).expanduser().absolute()
+
+
 class Store:
-    def __init__(self, path):
+    def __init__(self, path, *, native_workspaces=False, dsh_home=None, codex_home=None):
         self.path = Path(path).expanduser()
+        # An archive page can claim local paths; only inspect host-side names
+        # when the operator explicitly trusts the archive's local provenance.
+        self.dsh_home = _workspace_home(dsh_home, 'DSH_HOME', '.dsh', native_workspaces)
+        self.codex_home = _workspace_home(codex_home, 'CODEX_HOME', '.codex', native_workspaces)
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.db = sqlite3.connect(str(self.path), timeout=10, check_same_thread=False)
         os.chmod(str(self.path), 0o600)
@@ -207,15 +218,54 @@ class Store:
             quarantined = True
         return data, quarantined
 
+    def _apply_workspace_name(self, session, metadata):
+        source, instance, native_id = (session.get(k) for k in ('source', 'instance', 'native_id'))
+        if source not in ('codex', 'dsh', 'pi') or not all(isinstance(x, str) and x for x in (instance, native_id)):
+            return
+
+        def load(reader, home):
+            if source not in metadata:
+                metadata[source] = reader(home)
+            return metadata[source]
+
+        # The Trace project ID remains authoritative for archive ownership and
+        # consumption scope. It is not a workspace title. Resolve the display
+        # on read so old projections and native renames need no reimport.
+        name = None
+        if source == 'dsh' and self.dsh_home is not None:
+            name = archived_workspace_name(session, self.dsh_home, lambda: load(read_workspace_metadata, self.dsh_home))
+        elif source == 'codex' and self.codex_home is not None:
+            name = archived_project_name(session, self.codex_home, lambda: load(read_project_metadata, self.codex_home))
+        cwd = session.get('project')
+        if not name and cwd:
+            if isinstance(cwd, str) and os.path.isabs(cwd) and not any(ord(c) < 32 for c in cwd):
+                name = os.path.basename(os.path.normpath(cwd)) or '/'
+            else:
+                name = '未知工作区'  # Do not let the UI turn an invalid cwd into a label.
+        session['project_name'] = name
+
+    def _session_rows(self, session_id=None):
+        # Direct and archive imports can use the same identity format. Only
+        # archive ownership distinguishes which display projection applies.
+        archived = self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='archive_sessions'").fetchone()
+        sql = ('SELECT s.body, a.session_key IS NOT NULL FROM sessions s '
+               'LEFT JOIN archive_sessions a ON a.session_key=s.key' if archived else
+               'SELECT s.body, 0 FROM sessions s')
+        if session_id is not None:
+            return self.db.execute(sql + ' WHERE s.key=?', (session_id,))
+        return self.db.execute(sql + ' ORDER BY s.key')
+
     def _all(self):
-        sessions, warnings = [], []
-        for _key, body in self.db.execute('SELECT key,body FROM sessions ORDER BY key'):
+        sessions, warnings, workspace_metadata = [], [], {}
+        for body, archived in self._session_rows():
             data, quarantined = self._normalized_session(body)
             if data is None:
                 warnings.append(_CORRUPTED_SESSION_WARNING)
                 continue
             if quarantined:
                 warnings.append(_LEGACY_PROJECTION_WARNING)
+            if archived:
+                self._apply_workspace_name(data, workspace_metadata)
             sessions.append(data)
         return sessions, warnings
 
@@ -292,12 +342,14 @@ class Store:
     def detail(self, session_id, filters=None):
         # Read only the requested session and, when needed, its direct parent:
         # decoding the whole archive for one dialog made every open multi-second.
-        row = self.db.execute('SELECT body FROM sessions WHERE key=?', (session_id,)).fetchone()
+        row = self._session_rows(session_id).fetchone()
         if not row:
             return None
         s, quarantined = self._normalized_session(row[0])
         if s is None:
             return None
+        if row[1]:
+            self._apply_workspace_name(s, {})
         warnings = [_LEGACY_PROJECTION_WARNING] if quarantined else []
         f = _filters(filters)
         sessions_by_id = {s['id']: s}

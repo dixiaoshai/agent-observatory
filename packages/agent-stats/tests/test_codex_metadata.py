@@ -4,8 +4,9 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
-from agent_stats.codex_metadata import project_name, read_project_metadata, read_session_titles
+from agent_stats.codex_metadata import archived_project_name, project_name, read_project_metadata, read_session_titles
 from agent_stats.core import Store
 
 
@@ -272,6 +273,50 @@ class SessionNameTests(unittest.TestCase):
         result = self.store.query()
         self.assertEqual(result['sessions'][0]['project_name'], '新名称')
         self.assertEqual(result['summary']['token_total'], 40)
+
+
+class ArchivedProjectNameTests(unittest.TestCase):
+    def setUp(self):
+        self.home = '/trusted/codex'
+        self.session = {'source': 'codex', 'instance': 'local', 'native_id': 'session-a',
+                        'source_path': '/trusted/codex/sessions/2026/rollout.jsonl',
+                        'project': '/project/sub'}
+        self.load = Mock(return_value=({'session-a': '原生项目'},
+                                       [('/project', 0, '目录项目')]))
+
+    def test_thread_association_then_lexical_root_and_archived_sessions(self):
+        self.assertEqual(archived_project_name(self.session, self.home, self.load), '原生项目')
+        self.load.return_value = ({}, [('/project', 0, '父'), ('/project/sub', 0, '子')])
+        session = dict(self.session, source_path='/trusted/codex/archived_sessions/../sessions/rollout.jsonl')
+        self.assertEqual(archived_project_name(session, self.home, self.load), '子')
+        session['source_path'] = '/trusted/codex/archived_sessions/rollout.jsonl'
+        self.assertEqual(archived_project_name(session, self.home, self.load), '子')
+        self.assertEqual(self.load.call_count, 3)
+
+    def test_untrusted_session_never_loads_metadata(self):
+        for changes in ({'source': 'dsh'}, {'instance': 'remote'}, {'instance': None},
+                        {'native_id': None}, {'native_id': []}, {'source_path': None},
+                        {'source_path': 'sessions/rollout.jsonl'},
+                        {'source_path': '/trusted/codex/sessions'},
+                        {'source_path': '/trusted/codex/sessions-other/rollout.jsonl'},
+                        {'source_path': '/trusted/codex/sessions/../../other/rollout.jsonl'},
+                        {'source_path': '/trusted/codex/sessions/\x00bad'}):
+            with self.subTest(changes=changes):
+                self.assertIsNone(archived_project_name(dict(self.session, **changes), self.home, self.load))
+        for home in (None, 'relative', '/trusted/\x00codex'):
+            with self.subTest(home=home):
+                self.assertIsNone(archived_project_name(self.session, home, self.load))
+        self.load.assert_not_called()
+
+    def test_never_probes_cwd_or_resolves_symlinks(self):
+        self.load.return_value = ({}, [('/other/project', 0, '其他')])
+        with patch.object(Path, 'exists', side_effect=AssertionError('filesystem probe')), \
+             patch.object(Path, 'resolve', side_effect=AssertionError('symlink resolution')):
+            self.assertIsNone(archived_project_name(self.session, self.home, self.load))
+
+    def test_ambiguous_roots_remain_unknown(self):
+        self.load.return_value = ({}, [('/project', 0, '甲'), ('/project', 0, '乙')])
+        self.assertIsNone(archived_project_name(self.session, self.home, self.load))
 
 
 if __name__ == '__main__':

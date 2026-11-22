@@ -118,7 +118,35 @@ def _git_common_dir(directory):
         return None
 
 
-def project_name(identity, cwd, metadata):
+def archived_project_name(session, home, load_metadata):
+    """Resolve a local archived Codex label without trusting archive file paths.
+
+    The loader is supplied by the caller and must read only the configured Codex
+    home, never a home inferred from the archive. Path checks are lexical and do
+    not open the source or follow symlinks. The caller confirms archive ownership.
+    """
+    if session.get('source') != 'codex' or session.get('instance') != 'local':
+        return None
+    source = session.get('source_path')
+    identity = session.get('native_id')
+    if (not isinstance(source, str) or not source or '\x00' in source
+            or not os.path.isabs(source) or not isinstance(identity, str) or not identity):
+        return None
+    try:
+        home = os.fspath(home)
+        if not isinstance(home, str) or not os.path.isabs(home) or '\x00' in home:
+            return None
+        source = os.path.normpath(source)
+        home = os.path.normpath(home)
+        roots = (os.path.join(home, 'sessions'), os.path.join(home, 'archived_sessions'))
+        if not any(source != root and os.path.commonpath((root, source)) == root for root in roots):
+            return None
+    except (TypeError, ValueError):
+        return None
+    return project_name(identity, session.get('project'), load_metadata(), allow_worktree=False)
+
+
+def project_name(identity, cwd, metadata, *, allow_worktree=True):
     """Prefer Codex's explicit thread association, then the closest root."""
     thread_names, roots = metadata
     if identity in thread_names:
@@ -138,6 +166,10 @@ def project_name(identity, cwd, metadata):
         priority = min(row[1] for row in candidates if row[0] == depth)
         names = {row[2] for row in candidates if row[0] == depth and row[1] == priority}
         return next(iter(names)) if len(names) == 1 else None
+
+    # Archive paths and cwd are untrusted; callers can disable filesystem probes.
+    if not allow_worktree:
+        return None
 
     # Linked worktrees live outside the project root; compare Git's common dir.
     try:

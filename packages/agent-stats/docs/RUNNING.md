@@ -64,6 +64,16 @@ python3 -m agent_stats --db .agent-stats/stats.sqlite3 serve --archive-only
 - `config-check --config PATH` 只解析校验配置并输出安全投影（含 `allowed_project_ids`，全量时为 `null`），不建库、不联网、不回显 token。
 - 任务详情的正文范围仍由 Trace content 配置的项目集合决定，与 follow 的 `allowed_project_ids` 相互独立；两者不一致时统计已过滤、正文仍可读。
 
+## 工作区名称
+
+Stats 的「工作区」不使用 Trace 的项目 ID；`allowed_project_ids` 仍按归档项目过滤，Stats 工作区筛选仍以完整 `cwd` 为准。
+
+- **DSH**：对本机来源，按会话 ID 读取 DSH 的工作区标题（只读 `$DSH_HOME/storages/workspace.json` 的 v2 索引，默认 `DSH_HOME=~/.dsh`）。不读会话正文，不连接 DSH 服务。自定义存储后端、无法识别的格式或没有唯一归属时回退到启动目录名。
+- **Codex**：本机归档优先使用 Codex 项目元数据（会话关联优先，其次是匹配的项目根目录）。本机名称查询仅适用于 `local` 实例及 `$CODEX_HOME`（默认 `~/.codex`）下的 `sessions` / `archived_sessions` 来源；DSH 同样只对 `local` 实例和 `$DSH_HOME/sessions` 下的来源查本机索引。
+- **pi**：会话格式没有独立的工作区名称，使用启动目录名。其他来源无法读取原生名称时也使用启动目录名；没有目录则显示「未知工作区」。
+
+默认只从归档中的 `cwd` 推导名称，不读取本机 Agent 索引。确认 Stats 库只接收受信任的本机归档后，可给 `serve` 或 `summary` 加 `--native-workspaces` 启用上述只读查询；不要对外部或混合来源的库启用，因为归档里的实例名和来源路径不能证明来源身份。启用后，原生改名只需重新加载页面，无需重导或改写归档。
+
 ## macOS 登录自动启动（源码开发工具）
 
 源码安装器使用隔离的服务名、状态路径与端口，不接管其他服务：`local.agent-observatory.agent-stats`、`local.agent-observatory.agent-trace`、`local.agent-observatory.agent-stats-follow`，状态和配置默认位于 `~/.local/share/agent-observatory/`，看板端口默认 18765。

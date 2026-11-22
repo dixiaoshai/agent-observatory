@@ -37,6 +37,9 @@ def main(argv=None):
     summary = commands.add_parser("summary")
     for key in ("start", "end", "project", "model", "source"):
         summary.add_argument("--" + key)
+    for name in ("serve", "summary"):
+        commands.choices[name].add_argument("--native-workspaces", action="store_true",
+                                            help="仅对受信任本机归档，读取本机 Agent 元数据以显示原生工作区名")
     archive = commands.add_parser("import-archive", help="消费共享归档的 metadata JSON 批次，不读取原始日志")
     archive.add_argument("--input", required=True, help="agent-trace export --view metadata 的输出文件")
     custom = commands.add_parser("import-json", help="导入自定义规范化会话 JSON")
@@ -83,7 +86,7 @@ def main(argv=None):
     try:
         db = Path(args.db or default_db()).expanduser()
         db.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        store = Store(db)
+        store = Store(db, native_workspaces=getattr(args, 'native_workspaces', False))
         if args.command == "summary":
             print(json.dumps(store.query({k: getattr(args, k) for k in ("start", "end", "project", "model", "source") if getattr(args, k)}), ensure_ascii=False, indent=2))
         elif args.command == "import-json":
