@@ -5,6 +5,7 @@ export const pageHref = {
   sessions: '#/sessions',
   journal: '#/journal',
   source: '#/source',
+  knowledge: '#/knowledge',
 } as const satisfies Record<Page, string>;
 
 export function pageFromHash(hash: string): Page {
@@ -15,6 +16,8 @@ export function pageFromHash(hash: string): Page {
       return 'journal';
     case pageHref.source:
       return 'source';
+    case pageHref.knowledge:
+      return 'knowledge';
     default:
       return 'overview';
   }

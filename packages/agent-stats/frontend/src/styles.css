@@ -1480,6 +1480,39 @@ summary.content-event-heading {
 .content-blob {
   padding: 8px 0;
 }
+.knowledge-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  margin: 14px 0;
+}
+.knowledge-form label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+}
+.knowledge-result {
+  border-top: 1px solid var(--border);
+  padding: 12px 0;
+}
+.knowledge-result h3 {
+  overflow-wrap: anywhere;
+}
+.knowledge-result pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 8px 0;
+}
+.knowledge-verification {
+  margin-top: 12px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--border);
+}
+.knowledge-metadata {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
 @media (max-width: 640px) {
   .content-timeline {
     padding: 12px;

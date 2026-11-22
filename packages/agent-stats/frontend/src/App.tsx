@@ -6,6 +6,7 @@ import { useStats } from './hooks/useStats';
 import { formatDate, projectName, timeZone } from './lib/format';
 import { pageFromHash, pageHref } from './lib/pageRoute';
 import { Journal } from './pages/Journal';
+import { Knowledge } from './pages/Knowledge';
 import { Overview } from './pages/Overview';
 import { Sessions } from './pages/Sessions';
 import { Source } from './pages/Source';
@@ -24,11 +25,12 @@ const pages: { id: Page; label: string }[] = [
   { id: 'sessions', label: '各轮明细' },
   { id: 'journal', label: 'Agent Journal 日报' },
   { id: 'source', label: '来源与覆盖' },
+  { id: 'knowledge', label: 'Knowledge' },
 ];
 
 export default function App() {
   const [page, setPage] = useState(() => pageFromHash(window.location.hash));
-  const isStatsPage = page !== 'journal';
+  const isStatsPage = page !== 'journal' && page !== 'knowledge';
   const [controls, setControls] = useState(initialFilters);
   const [selection, setSelection] = useState<Selection | null>(null);
   useEffect(() => {
@@ -156,6 +158,8 @@ export default function App() {
         )}
         {page === 'journal' ? (
           <Journal />
+        ) : page === 'knowledge' ? (
+          <Knowledge />
         ) : page === 'source' ? (
           <Source />
         ) : data ? (

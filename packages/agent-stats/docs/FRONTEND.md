@@ -8,8 +8,9 @@
 - **各轮明细**：默认会话视角，可切换逐轮视角；支持搜索、排序、筛选、展开 / 折叠，以及打开会话或轮次详情。会话行在 Prompt 列显示该会话首轮 Prompt 摘要，会话与轮次两张表均有 Agent 列。
 - **来源与覆盖**：从 `/api/capabilities` 读取来源能力、状态与降级原因。
 - **Agent Journal 日报**：按日期选择已生成日报，默认最新，可重新读取；不受 Stats 筛选影响，Markdown 原文按纯文本展示。配置与安全边界见[运行说明](RUNNING.md)。
+- **Knowledge**：通过 `/#/knowledge` 直达，独立检索已索引的文档和代码，按纯文本展示经核验的片段及其定位；“查看来源”会重新核验片段并显示来源版本与 SHA-256。知识库同步后重新搜索即可看到新内容，无需重启服务。启用方式见[运行说明](RUNNING.md#检索-agent-knowledge可选)。
 
-四个页面可分别通过 `/#/overview`、`/#/sessions`、`/#/journal`、`/#/source` 直达，支持刷新和浏览器前进 / 后退。不带片段或片段无法识别时显示总览。链接只定位页面，不包含筛选条件或选中的会话 / 轮次。
+各页面可分别通过 `/#/overview`、`/#/sessions`、`/#/journal`、`/#/source`、`/#/knowledge` 直达，支持刷新和浏览器前进 / 后退。不带片段或片段无法识别时显示总览。链接只定位页面，不包含筛选条件、搜索词或选中的会话 / 轮次。
 
 ## 模块边界
 
@@ -19,7 +20,6 @@
 | `pages/Overview.tsx` | 总览卡片、趋势、模型与最近会话 |
 | `pages/Sessions.tsx` | 会话 / 轮次视角、层级展开、搜索、排序与详情入口 |
 | `pages/Source.tsx` | 来源能力和隐私说明 |
-| `pages/Journal.tsx` | Agent Journal 日报日期选择与原文展示 |
 | `lib/sessionTree.ts`、`lib/turnTree.ts` | 按 `parent_id` 构建会话树、按 `parent_turn_id` 构建轮次树 |
 | `lib/sessionRows.ts` | 会话与轮次行的纯函数展开逻辑（折叠、隐藏已按父轮次挂载的子代理会话、搜索保留祖先），供组件与单元测试共用 |
 | `components/` | 筛选栏、指标卡、Token 构成饼图、趋势图、会话 / 轮次弹窗与正文时间线 |

@@ -99,6 +99,90 @@ try {
   assert.match(run('python3', ['-c', python], dir, env), /standalone-stats-ok/);
   assert.match(run('python3', [consoleEntry, '--help'], dir, env), /usage:/i);
   results['agent-stats'] = { installed_alone: true, packaged_example_cli: true, custom_import: true, static_assets: true };
+
+  // Exercise the opt-in bridge only after both independent-install assertions.
+  // Both the executable and Python modules are the isolated installed artifacts;
+  // the source, config and databases below exist only in this temporary directory.
+  const knowledgeBin = path.join(temporary, 'agent-knowledge/node_modules/.bin/agent-knowledge');
+  assert(existsSync(knowledgeBin), 'installed Knowledge executable missing');
+  const integration = `
+import hashlib, json, pathlib, subprocess, sys, threading
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
+from agent_stats.knowledge import KnowledgeReader
+from agent_stats.server import make_server
+
+root = pathlib.Path.cwd()
+binpath = pathlib.Path(sys.argv[1])
+source = root / 'synthetic-knowledge'
+source.mkdir()
+file = source / 'note.md'
+original = '# Packaged integration\\nSynthetic cobalt narwhal evidence.\\n'
+file.write_text(original, encoding='utf-8')
+config = root / 'synthetic-knowledge.json'
+config.write_text(json.dumps({
+    'schema_version': 1, 'database': 'synthetic-knowledge.sqlite',
+    'allowed_project_ids': ['package-demo'],
+    'sources': [{'id': 'package-source', 'root': str(source), 'project_id': 'package-demo'}],
+}), encoding='utf-8')
+def sync():
+    subprocess.run([str(binpath), 'sync', '--source=package-source', '--config=' + str(config)],
+                   check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20)
+sync()
+server = make_server(None, [], 0, archive_only=True, knowledge_reader=KnowledgeReader(config, binpath))
+thread = threading.Thread(target=server.serve_forever, daemon=True)
+thread.start()
+try:
+    base = 'http://127.0.0.1:%s' % server.server_port
+    def post(operation, payload):
+        request = Request(base + '/api/knowledge/' + operation,
+                          data=json.dumps(payload).encode(), headers={'Content-Type': 'application/json'})
+        try:
+            response = urlopen(request, timeout=15)
+        except HTTPError as exc:
+            response = exc
+        with response:
+            return response.status, json.load(response)
+    def search():
+        status, body = post('search', {'query': 'cobalt narwhal', 'project': 'package-demo'})
+        assert status == 200, (status, body)
+        return body['results']
+    results = search()
+    assert len(results) == 1, results
+    hit = results[0]
+    assert (hit['project_id'], hit['source_id'], hit['path'], hit['start_line'], hit['end_line'], hit['content']) == (
+        'package-demo', 'package-source', 'note.md', 1, 2, original), hit
+    assert 'owner_id' not in hit and 'content_hash' not in hit, hit
+    identity = hit['id']
+    status, body = post('read', {'id': identity, 'project': 'package-demo'})
+    assert status == 200, (status, body)
+    record = body['record']
+    for key, value in hit.items():
+        assert record[key] == value, (key, record, hit)
+    assert record['content_hash'] == hashlib.sha256(original.encode()).hexdigest(), record
+    assert record['source_version_id'] and record['git_commit'] is None, record
+    assert 'owner_id' not in record, record
+    assert post('read', {'id': identity, 'project': 'outside-scope'})[0] == 403
+    assert post('search', {'query': 'cobalt narwhal', 'project': 'outside-scope'})[0] == 403
+    file.write_text('Synthetic cobalt narwhal changed.\\n', encoding='utf-8')
+    assert post('read', {'id': identity, 'project': 'package-demo'})[0] == 404
+    assert search() == []
+    sync()
+    changed = search()
+    assert len(changed) == 1, changed
+    new_id = changed[0]['id']
+    file.unlink()
+    assert post('read', {'id': new_id, 'project': 'package-demo'})[0] == 404
+    assert search() == []
+    print('installed-knowledge-bridge-ok')
+finally:
+    server.shutdown()
+    thread.join(timeout=5)
+    server.server_close()
+    assert not thread.is_alive(), 'temporary HTTP server did not stop'
+`;
+  assert.match(run('python3', ['-c', integration, knowledgeBin], dir, env), /installed-knowledge-bridge-ok/);
+  results['agent-stats'].knowledge_bridge = { packaged_cli: true, verified_source: true, stale_and_scope: true };
   console.log(JSON.stringify({ passed: true, source_tree_inputs_after_staging: false, modules: results }, null, 2));
 } finally {
   const resolved = realpathSync(temporary);

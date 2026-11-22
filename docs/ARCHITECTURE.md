@@ -25,11 +25,12 @@ Codex / pi / dsh → Trace → metadata → Stats
 自定义用量            → Stats provider / JSON importer
 自定义活动            → Journal activity importer
 本地文件 / 自定义 scanner → Knowledge 文档索引
+本地知识库            → Knowledge CLI（按需进程调用）→ Stats Knowledge 页
 ```
 
 | 消费模块 | 自有输入 | 可选默认适配器 |
 | --- | --- | --- |
-| Stats | SourceProvider → 标准化 session / turn / usage | 直接 Codex reader；Trace metadata importer / follow |
+| Stats | SourceProvider → 标准化 session / turn / usage | 直接 Codex reader；Trace metadata importer / follow；Knowledge CLI 按需检索（显式配置） |
 | Journal | JournalActivitySnapshot → 现有日期投影与缓冲 | Trace content client / sync |
 | Knowledge | SourceScanner → 文档完整快照 | 内置文件 scanner；Trace evidence 为独立可选路径 |
 
@@ -81,7 +82,7 @@ Codex / pi / dsh → Trace → metadata → Stats
 
 ## 边界约束
 
-1. Stats / Journal / Knowledge 的独立核心功能不依赖 Trace npm 包、数据库文件或源码。为兼容旧功能，Stats 的可选正文下钻仍直接只读配置的 Trace content 库；自定义来源不需要它，可用 `--no-content` 关闭。这是保留的可选适配器耦合，不是必须部署的基础设施。Trace 不启动下游命令，也不管理下游游标。
+1. Stats / Journal / Knowledge 的独立核心功能不依赖 Trace npm 包、数据库文件或源码。为兼容旧功能，Stats 的可选正文下钻仍直接只读配置的 Trace content 库；自定义来源不需要它，可用 `--no-content` 关闭。这是保留的可选适配器耦合，不是必须部署的基础设施。Trace 不启动下游命令，也不管理下游游标。Stats 的 Knowledge 页同样可选：只按需启动 Knowledge CLI，不打开其数据库；未配置时完全禁用。
 2. 保留旧 Trace v1 协议校验，普通自定义输入不必伪造它。Journal 内部复用既有 event 投影，不把内部表示当作自定义输入要求。
 3. 每个模块拥有自己的状态库、租约、事务与数据来源身份。独立安装不等于可把不同来源的状态混入同一数据库。
 4. Stats 的自定义 session 身份使用独立命名空间；Journal 的一个库只能绑定一个来源；Knowledge 按 source / project / owner 约束来源。

@@ -252,4 +252,18 @@ export interface JournalDay {
   date: string;
   markdown: string;
 }
-export type Page = 'overview' | 'sessions' | 'journal' | 'source';
+export interface KnowledgeResult {
+  id: string;
+  project_id: string;
+  source_id: string;
+  path: string;
+  start_line: number;
+  end_line: number;
+  content: string;
+}
+export interface KnowledgeRecord extends KnowledgeResult {
+  source_version_id: string;
+  content_hash: string;
+  git_commit: string | null;
+}
+export type Page = 'overview' | 'sessions' | 'journal' | 'source' | 'knowledge';

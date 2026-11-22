@@ -80,7 +80,7 @@ Dependabot 配置在[根配置](../.github/dependabot.yml)：
 
 `verify:sources` 将各模块源码复制到无兄弟模块的独立临时目录，使用各自锁文件安装依赖并运行完整检查，显式拒绝 Node / Python 测试 skipped 和零测试。Journal 使用模块内合成协议 fixtures，Knowledge 的模块测试构造自己的合成页；缺必要资源会失败，不会静默少测。独立锁的传递版本可能不在根缓存中，此命令使用 prefer-offline，缺缓存时可正常下载；不是离线环境保证。
 
-`verify:packages` 构建并暂存发行物后，只从安装后的包读取示例、配置和 fixtures。Stats 用安装后的 `agent-stats example --output FILE` 提取随 wheel 提供的 JSON；Knowledge 直接运行 tarball 原始示例，不重写 import。配置复制到临时可写目录，不写 node_modules。
+`verify:packages` 构建并暂存发行物后，只从安装后的包读取示例、配置和 fixtures。Stats 用安装后的 `agent-stats example --output FILE` 提取随 wheel 提供的 JSON；Knowledge 直接运行 tarball 原始示例，不重写 import。验证独立安装后，再用合成来源检查可选的 Stats → Knowledge 检索、来源核验、项目限制和失效处理。配置和来源放在临时可写目录，不写 node_modules。
 
 安装器安全只通过纯计划函数、临时目录、子进程 / 文件写入 / 网络 mock 验证拒绝路径和 dry-run；不实际调用 `launchctl`、不安装或卸载服务。真实部署另见[安全说明](SAFETY.md)。
 

@@ -39,6 +39,27 @@ python3 -m agent_stats serve --archive-only --no-content --journal-dir /path/to/
 
 日报功能使用 macOS / Linux 的目录文件描述符：Stats 启动时打开指定目录，目录当时不可访问或后来被整体替换时，需要重启 Stats。只接受该目录下名为 `YYYY-MM-DD.md` 的普通文件，不跟随日报文件的符号链接。日报是二手摘要，仍可能包含敏感信息，只配置愿意向本机看板访问者展示的目录。
 
+## 检索 Agent Knowledge（可选）
+
+先按 [Knowledge 运行指南](../../agent-knowledge/docs/running.md) 配置并同步已授权的文档或代码来源，再启动 Stats：
+
+```bash
+agent-stats --db ./stats.sqlite3 serve --archive-only --no-content \
+  --knowledge-config /path/to/agent-knowledge.json
+```
+
+此接入适用于 macOS / Linux。默认从 `PATH` 找 `agent-knowledge`；若 CLI 安装在独立项目目录，可通过 `--knowledge-bin /path/to/node_modules/.bin/agent-knowledge` 指定受信任的可执行文件（仍需可运行的 Node）。直接使用源码仓库的 `dist/interfaces/cli.js` 时，该文件可能没有可执行权限，此时改用安装后的 `bin`，或提供一个仅执行 `node <cli.js>` 的 wrapper 路径。不传 `--knowledge-config` 就不启动 CLI，也不发现宿主配置。Stats 的其他页面不受影响。
+
+在 **Knowledge** 页输入搜索词，可选按 Knowledge 项目 ID（不是 Stats 项目路径）限定范围。最多显示 10 个经 Knowledge 核验的原文片段，含项目、来源、相对路径及行号；不展示 Trace 归档证据，不跟随 Stats 筛选。
+
+知识库完成同步或构建后**不需要重启 Stats**：每次搜索和查看来源都会新起一次 CLI，读取当时的数据库并重新核验源文件。页面不会自动刷新，重新提交搜索即可看到新内容。只改源文件而未重新同步时，旧记录因校验失败不再返回；这与 Knowledge 自身 `search` / `read` 的失效规则一致。
+
+点 **查看来源** 会按该结果的项目和记录 ID 重新核验片段，显示来源版本、文件 SHA-256 和索引记录的 Git commit（如有），不会打开整个文件。源文件变更或被删除时，不再显示该结果的旧片段；需要同步来源后重新搜索。
+
+Stats 不直接打开 Knowledge 数据库、不索引文件，也不保存搜索词或结果。它只按需运行 Knowledge 的 `search` 和 `read`，授权范围和文件核验由 Knowledge 负责；CLI 正常启动仍可能初始化自身数据库。只为看板配置愿意暴露给本机访问者的来源；返回的原文可能含敏感信息。搜索词作为本机 CLI 参数传递，不放进 URL 或 Stats 日志。
+
+源码安装器的隔离看板目前不包含 Knowledge 参数；需要随登录启动时，在自定义启动项中显式传入上述两个参数。
+
 ## 自动跟随 Trace（可选）
 
 Trace 侧先按[服务配置](../../agent-trace/docs/service-config.md)启动 `serve --config`，为 Stats 客户端只授权 `metadata` 视图，并生成 bearer token。明文 token 只放进环境变量。示例配置见 [agent-stats.follow.example.json](../agent-stats.follow.example.json)：
@@ -139,6 +160,8 @@ python3 -m venv .venv
 - **总览（Overview）**：Token 已知小计、缓存读取与未缓存输入、缓存占输入与配对覆盖、有效样本、中位数 / P90、每日趋势、模型构成、费用估算与消耗集中度。
 - **各轮明细**：会话与轮次两种视角，支持搜索、排序、筛选、逐轮用量、生命周期与工具元数据、来源定位；任务详情可加载正文时间线。
 - **来源与覆盖**：接入能力、费用 / 请求数等未知指标的原因。
+- **Agent Journal 日报**：按日期只读已生成的 Daily 报告，默认最新；不受统计筛选影响，未配置时显示未启用。见[查看 Agent Journal 日报](#查看-agent-journal-日报可选)。
+- **Knowledge**：按 Knowledge 项目检索已索引的文档和代码，展开来源核验片段；独立于统计筛选，未配置时显示未启用。见[检索 Agent Knowledge](#检索-agent-knowledge可选)。
 
 统计口径：
 
@@ -162,6 +185,9 @@ python3 -m venv .venv
 | `GET /api/session-content/blob?id=...&event_id=...&pointer=...` | 读取当前会话事件 body 中 JSON pointer 指向的外置正文，校验固定目录、常规文件、大小与 SHA-256；不接受浏览器文件路径，最多 16 MiB |
 | `GET /api/journal/days` | 返回 `{enabled:boolean,days:string[]}`，日期降序；未配置时 `enabled` 为 `false` |
 | `GET /api/journal/day?date=YYYY-MM-DD` | 返回 `{date:string,markdown:string}`；日期无效返回 400，未配置或日报缺失返回 404，非 UTF-8 或目录不可访问返回通用 500，超过 2 MiB 返回 413 |
+| `GET /api/knowledge/status` | 返回 `{enabled:boolean}`，表示是否显式配置，不探测 CLI 或数据库 |
+| `POST /api/knowledge/search` | JSON 请求 `{query, project?}`；返回 `{results:[{id,project_id,source_id,path,start_line,end_line,content}]}`，最多 10 个片段；每次请求启动 CLI，Stats 不缓存结果；未配置返回 503、项目不允许返回 403、查询与核验串行且忙时返回 429、CLI 查询超过 20 秒返回 504 |
+| `POST /api/knowledge/read` | JSON 请求 `{id,project}`；返回 `{record}`，在检索结果字段之外含 `source_version_id`、`content_hash` 和可为 `null` 的 `git_commit`；不接受文件路径。原文变更、记录被删除或在所选项目不可见时返回 404，不返回旧片段 |
 | `GET /api/capabilities` | 接入能力与降级原因 |
 | `POST /api/refresh` | Content-Type 必须为 `application/json`；请求体可用 `{}`；仅刷新服务启动时配置的路径 |
 
@@ -169,6 +195,7 @@ python3 -m venv .venv
 - overview 的 turns 不下发整轮的 `tools` / `evidence` / `usage_records` 数组，只给 `tools_count` 与 `tool_output_bytes`（所有工具输出大小都已观察时求和，否则为未知）；详情接口保留完整记录。
 - `/api/overview` 的响应按筛选参数缓存在服务进程内（最多 8 份）；follow 导入或 `/api/refresh` 写入数据库文件后自动失效，数据未变时刷新页面不重复重算。响应仍为 `Cache-Control: no-store`，浏览器不缓存。
 - 不存在身份返回 404；无效时间 / 窗口 / 参数返回 400；`/api/refresh` 非 JSON 返回 415、请求体过大返回 413；正文归档变更冲突返回 409；外部正文路径越界返回 403。
+- Knowledge 搜索与来源核验不进入 Stats 的 overview 缓存，也不写入统计库；同步知识库后重新搜索即可，无需重启服务。
 - 错误 JSON 为 `{"error":"说明"}`。静态资源只托管入口页与 `/assets/` 下带内容哈希的 JS / CSS；没有 marker / compare 等优化比对接口。
 
 ## 隐私与运行边界
@@ -177,6 +204,7 @@ python3 -m venv .venv
 - 项目路径、事件身份、来源文件定位与摘要仍可能暴露工作信息；数据库按 0600、目录按 0700 创建，使用 DELETE journal 模式避免长期保留 WAL 侧文件。数据库和备份请按本机敏感数据管理；源日志自身的保存策略不由本工具改变。
 - 正文下钻只读取显式配置的 Trace content 归档：不写统计库、不依赖 Knowledge、不打开 Codex / pi 源日志。只读取配置项目范围内的未删除会话；单页正文最多 16 MiB、外置正文最多 16 MiB、单个会话最多 128 MiB，超限明确拒绝而不静默截断。正文按文本展示，不执行 HTML、脚本或命令；推理摘要不是完整思考，工具返回不等于执行成功。
 - HTTP 服务仅绑定 IPv4 回环地址，拒绝不匹配 Host 与跨来源请求，响应带 CSP 等安全头；没有远程访问功能。服务端访问日志不打印源路径、查询串或请求体。
+- Knowledge 页的检索词只作为本机 CLI 参数传入，不写入 Stats 数据库或日志；返回的原文按纯文本展示，可能包含来源文件中的敏感信息，按 Knowledge 的授权范围与来源敏感度控制。
 - 损坏记录显示错误 / 覆盖影响，其余可读记录继续采集；采集与 Codex 进程完全独立，失败不阻断 Agent。未知指标保持未知。
 - follow token 只从环境变量读取，不写入配置、日志或 stdout。
 
@@ -187,4 +215,5 @@ python3 -m venv .venv
 - 父子与分叉计量依赖可确认的来源身份；无法确认时只展示带标注的观测小计，不按时间猜测归属。
 - 真实 Codex 宿主的长期运行、launchd 监督下的 follow、断网 / DNS / 429 / 超大分页与磁盘故障恢复未纳入自动验证。
 - macOS 安装器的受管路径预检是尽力检查，不是完整沙箱；多服务安装不是全局事务，运行期失败不自动回滚已安装服务。
+- Knowledge 检索每次按需启动 CLI，需要本机可运行的 Node 与 Knowledge CLI；结果不缓存，源文件的全量核验在来源较大时会增加查询耗时。
 - 本模块是本地单用户工具，不提供远程访问、多用户认证、跨设备同步、预算控制或因果诊断；优化比对不在当前范围。

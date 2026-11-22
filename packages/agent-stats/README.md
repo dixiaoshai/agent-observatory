@@ -4,7 +4,7 @@
 
 Agent Stats 是 Agent Observatory 中的用量统计模块，作为独立 Python 包发行。它把 Codex、pi、dsh 的本地日志（或自定义标准化会话数据）解析为 SQLite 统计投影，并通过本机看板展示用量、费用估算与覆盖信息；任务详情可按需只读 Agent Trace 的正文归档。
 
-- 独立运行：要求 Python 3.9+，后端只用标准库，前端构建产物随包分发，生产运行不需要 Node。
+- 独立运行：要求 Python 3.9+，后端只用标准库，前端构建产物随包分发。只有启用可选的 Knowledge 检索才需要另装 Knowledge CLI 和 Node。
 - 输入可选：原生 Codex 日志、自定义 JSON / Python provider、可选 Agent Trace metadata（`follow` / `import-archive`）。
 - 只读本机，只保存统计元数据；缺失信息保持未知，不补零。
 - 服务只监听 `127.0.0.1`，不提供远程访问。
@@ -63,6 +63,10 @@ python3 -m agent_stats serve --archive-only --no-content --journal-dir /path/to/
 ```
 
 打开「Agent Journal 日报」标签，按日期选择已生成的总结，默认显示最新一份。Stats 不生成日报，也不需要安装 Journal。详见[运行说明](docs/RUNNING.md#查看-agent-journal-日报可选)。
+
+## Agent Knowledge（可选）
+
+在 **Knowledge** 页检索已经索引的文档和代码，查看经来源核验的原文、相对路径和行号。默认不接入；通过 `serve --knowledge-config PATH` 显式启用，不影响统计页面。知识库同步或构建完成后直接重新搜索即可，无需重启 Stats。见[配置与运行说明](docs/RUNNING.md#检索-agent-knowledge可选)。
 
 ## 任务详情正文下钻（可选）
 
@@ -135,6 +139,7 @@ python3 scripts/check_sensitive.py
 - `follow` 的 bearer token 只从环境变量读取，不写入配置或日志。
 - HTTP 服务只绑定 IPv4 回环地址，拒绝不匹配 Host 与跨来源请求；没有远程访问能力。
 - 正文下钻是显式的只读能力：不写统计库、不依赖 Knowledge、不打开源日志，可用 `serve --no-content` 关闭。
+- Knowledge 页只在显式配置后按需调用本机 CLI，不打开其数据库、不保存检索词或结果；返回原文可能含来源中的敏感信息。
 - 本机日志格式与版本相关，不是稳定公开 API；未知指标保持未知，API 等价费用估算不等于实际账单。
 - macOS 安装器是源码开发工具：预览用 `--dry-run`（只展示计划，不做文件或服务修改），真实安装 / 卸载必须显式 `--apply` 并另行授权，无参数时会拒绝变更。运行前请读[安装器安全说明](../../docs/SAFETY.md)。
 

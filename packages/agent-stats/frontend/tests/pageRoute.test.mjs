@@ -8,6 +8,7 @@ test('each dashboard page has a distinct URL fragment that resolves back to it',
     sessions: '#/sessions',
     journal: '#/journal',
     source: '#/source',
+    knowledge: '#/knowledge',
   });
   for (const [page, href] of Object.entries(pageHref)) {
     assert.equal(pageFromHash(new URL(href, 'http://127.0.0.1:8765/').hash), page);

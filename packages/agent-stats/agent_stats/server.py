@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from .content import ContentError, ContentReader
+from .knowledge import KnowledgeError, KnowledgeReader
 
 
 CAPABILITIES = {
@@ -159,11 +160,13 @@ def _journal_response(directory, path, params):
         return 500, {'error': '日报读取失败，请检查目录与文件权限'}
 
 
-def make_server(store, paths, port=8765, instance="local", archive_only=False, content_reader=None, journal_dir=None):
+def make_server(store, paths, port=8765, instance="local", archive_only=False, content_reader=None, journal_dir=None,
+                knowledge_reader=None):
     lock = threading.RLock()
     static = Path(__file__).parent / "static"
     capabilities = dict(CAPABILITIES)
     content_reader = content_reader or ContentReader(None)
+    knowledge_reader = knowledge_reader or KnowledgeReader()
     capabilities['items'] = list(CAPABILITIES['items']) + [
         {'name': '执行正文', 'status': '按需读取 Trace content 归档',
          'detail': '任务详情展示已脱敏的请求、回复、推理摘要和工具输入输出；正文不写入统计库，不依赖 Knowledge。未覆盖的任务明确提示。'}]
@@ -240,6 +243,8 @@ def make_server(store, paths, port=8765, instance="local", archive_only=False, c
             url = urlsplit(self.path)
             params = {k: v[-1] for k, v in parse_qs(url.query).items()}
             try:
+                if url.path == '/api/knowledge/status':
+                    return self.respond(200, {'enabled': knowledge_reader.enabled})
                 if url.path in ('/api/journal/days', '/api/journal/day'):
                     status, result = _journal_response(journal, url.path, params)
                     return self.respond(status, result)
@@ -284,7 +289,11 @@ def make_server(store, paths, port=8765, instance="local", archive_only=False, c
         def do_POST(self):
             if not self.allowed():
                 return
-            if self.path != "/api/refresh":
+            knowledge_operation = {
+                '/api/knowledge/search': knowledge_reader.search,
+                '/api/knowledge/read': knowledge_reader.read,
+            }.get(self.path)
+            if self.path != '/api/refresh' and knowledge_operation is None:
                 return self.respond(404, {"error": "接口不存在"})
             try:
                 size = int(self.headers.get("Content-Length", "0"))
@@ -292,7 +301,9 @@ def make_server(store, paths, port=8765, instance="local", archive_only=False, c
                     return self.respond(413, {"error": "请求过大"})
                 if self.headers.get("Content-Type", "").split(";")[0] != "application/json":
                     return self.respond(415, {"error": "需要 application/json"})
-                json.loads(self.rfile.read(size) or b"{}")
+                payload = json.loads(self.rfile.read(size) or b"{}")
+                if knowledge_operation is not None:
+                    return self.respond(200, knowledge_operation(payload))
                 if archive_only:
                     report = dict(archive_only_report)
                     report["received_at"] = datetime.now(timezone.utc).isoformat()
@@ -300,10 +311,14 @@ def make_server(store, paths, port=8765, instance="local", archive_only=False, c
                 with lock:
                     result = store.import_paths(paths, instance=instance)
                 self.respond(200, result)
-            except (ValueError, TypeError):
+            except KnowledgeError as exc:
+                self.respond(exc.status, {'error': str(exc)})
+            except (ValueError, TypeError, RecursionError):
                 self.respond(400, {"error": "无效请求"})
             except Exception:
-                self.respond(500, {"error": "采集失败，Agent 运行不受影响；请检查源文件与数据库权限"})
+                message = ('Knowledge 本机查询失败' if knowledge_operation is not None
+                           else '采集失败，Agent 运行不受影响；请检查源文件与数据库权限')
+                self.respond(500, {'error': message})
 
     journal = _JournalDirectory(journal_dir)
 

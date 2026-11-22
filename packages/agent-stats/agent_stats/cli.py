@@ -8,6 +8,7 @@ from pathlib import Path
 from .core import Store
 from .server import make_server
 from .content import ContentReader, default_content_config
+from .knowledge import KnowledgeReader
 
 
 def default_sources():
@@ -30,6 +31,8 @@ def main(argv=None):
         if command == "serve":
             sub.add_argument("--port", type=int, default=8765)
             sub.add_argument("--journal-dir", help="显式指定只读 Journal 正式日报目录；默认禁用")
+            sub.add_argument('--knowledge-config', help='显式启用 Knowledge 页面，指定 Agent Knowledge 配置')
+            sub.add_argument('--knowledge-bin', help='指定受信任的 Agent Knowledge CLI 可执行文件路径；默认从 PATH 查找')
             sub.add_argument("--archive-only", "--no-import", dest="archive_only", action="store_true",
                              help="只消费已接收的归档数据：启动和页面刷新都不读取 Codex 源日志")
             content = sub.add_mutually_exclusive_group()
@@ -56,6 +59,8 @@ def main(argv=None):
     demo = commands.add_parser("demo", help="向指定目录生成纯合成 Codex 事件")
     demo.add_argument("--output", default=".agent-stats/demo")
     args = parser.parse_args(argv)
+    if args.command == 'serve' and args.knowledge_bin and not args.knowledge_config:
+        parser.error('--knowledge-bin 需要同时指定 --knowledge-config')
     if args.command == "example":
         from importlib import resources
         try:
@@ -110,7 +115,8 @@ def main(argv=None):
                 print(json.dumps(store.import_paths(paths, instance=args.instance), ensure_ascii=False))
             content_path = None if args.no_content else args.content_config or default_content_config()
             server = make_server(store, paths, args.port, args.instance, archive_only=args.archive_only,
-                                 content_reader=ContentReader(content_path), journal_dir=args.journal_dir)
+                                 content_reader=ContentReader(content_path), journal_dir=args.journal_dir,
+                                 knowledge_reader=KnowledgeReader(args.knowledge_config, args.knowledge_bin))
             print("Agent Stats: http://127.0.0.1:%s · Ctrl+C 停止" % server.server_port, flush=True)
             try:
                 server.serve_forever()

@@ -4,6 +4,8 @@ import type {
   ImportReport,
   JournalDay,
   JournalDays,
+  KnowledgeRecord,
+  KnowledgeResult,
   Overview,
   SessionContent,
   SessionDetail,
@@ -69,6 +71,25 @@ export const getJournalDays = (signal?: AbortSignal) =>
 
 export const getJournalDay = (date: string, signal?: AbortSignal) =>
   request<JournalDay>(`/api/journal/day?${query({}, { date })}`, { signal });
+
+export const getKnowledgeStatus = (signal?: AbortSignal) =>
+  request<{ enabled: boolean }>('/api/knowledge/status', { signal });
+
+export const searchKnowledge = (query: string, project?: string, signal?: AbortSignal) =>
+  request<{ results: KnowledgeResult[] }>('/api/knowledge/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, ...(project ? { project } : {}) }),
+    signal,
+  });
+
+export const readKnowledge = (id: string, project: string, signal?: AbortSignal) =>
+  request<{ record: KnowledgeRecord }>('/api/knowledge/read', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, project }),
+    signal,
+  });
 
 export const getCapabilities = (signal?: AbortSignal) =>
   request<Capabilities>('/api/capabilities', { signal });

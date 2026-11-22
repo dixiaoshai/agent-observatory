@@ -7,11 +7,11 @@ Agent 执行观察与经验沉淀工具集：**一个仓库开发，四个功能
 | 模块 | 职责 | 不运行 Trace 的用法 |
 | --- | --- | --- |
 | [Agent Trace](packages/agent-trace/README.md) | 采集 Codex / pi / dsh 日志，归档执行证据 | 本身是可选的证据基础设施，不依赖其他模块 |
-| [Agent Stats](packages/agent-stats/README.md) | 用量、费用、会话统计与本地看板 | 原生 Codex 日志，或标准化 session JSON / Python provider |
+| [Agent Stats](packages/agent-stats/README.md) | 用量、费用、会话统计与本地看板；可选 Knowledge 检索页 | 原生 Codex 日志，或标准化 session JSON / Python provider |
 | [Agent Journal](packages/agent-journal/README.md) | 活动导入、确定性日报、可选模型总结 | 自己的 activity JSON，离线生成日报 |
 | [Agent Knowledge](packages/agent-knowledge/README.md) | 本地知识索引、检索、来源核验与 MCP | 本地文档，或自定义 SourceScanner |
 
-Trace 是默认可选数据来源，**不是其他三个模块的安装依赖**。Stats、Journal、Knowledge 的核心功能都使用自己的输入独立运行；自定义来源与正常运行不读取其他模块数据库。Stats 保留对显式配置的 Trace 正文库的只读下钻，独立使用时可用 `--no-content` 关闭。不存在必须安装的总控服务或巨型 core 包，Node 与 Python 各自保留合适的工具链。
+Trace 是默认可选数据来源，**不是其他三个模块的安装依赖**。Stats、Journal、Knowledge 的核心功能都使用自己的输入独立运行；自定义来源与正常运行不读取其他模块数据库。Stats 保留对显式配置的 Trace 正文库的只读下钻，独立使用时可用 `--no-content` 关闭；Knowledge 页也只在显式配置时按需调用 Knowledge CLI，不打开其数据库。不存在必须安装的总控服务或巨型 core 包，Node 与 Python 各自保留合适的工具链。
 
 ## 开发安装
 
