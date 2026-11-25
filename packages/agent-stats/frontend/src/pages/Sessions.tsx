@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { coverageText, turnCost, turnTokens } from '../lib/coverage';
 import type { Overview, Selection, Session, Turn } from '../types';
+import {
+  aggregateCostComplete,
+  aggregateCostKnown,
+  aggregateTokenKnown,
+  aggregateTokenSortValue,
+  sessionAggregate,
+} from '../lib/sessionAggregate';
 import { buildSessionTree, type SessionNode } from '../lib/sessionTree';
 import { buildTurnTree, type TurnNode } from '../lib/turnTree';
 import {
@@ -63,7 +70,7 @@ export function Sessions({ data, onSelect }: { data: Overview; onSelect: (s: Sel
               .includes(query),
         )
         .slice()
-        .sort((a, b) => compare(a, b, sort));
+        .sort((a, b) => compareSessions(a, b, sort));
     }
     return data.turns
       .filter(
@@ -74,14 +81,14 @@ export function Sessions({ data, onSelect }: { data: Overview; onSelect: (s: Sel
             .includes(query),
       )
       .slice()
-      .sort((a, b) => compare(a, b, sort));
+      .sort((a, b) => compareTurns(a, b, sort));
   }, [data, unit, sort, appliedSearch]);
   // The session row prompt is the first turn's prompt, not the first sorted row.
   const firstTurns = useMemo(() => firstTurnsBySession(data.turns), [data.turns]);
   const turnTree = useMemo(
     () =>
       buildTurnTree(
-        data.turns.slice().sort((a, b) => compare(a, b, sort)),
+        data.turns.slice().sort((a, b) => compareTurns(a, b, sort)),
         appliedSearch
           ? new Set(
               unit === 'sessions'
@@ -107,7 +114,7 @@ export function Sessions({ data, onSelect }: { data: Overview; onSelect: (s: Sel
   }, [turnTree]);
   const sessionTree = useMemo<SessionNode<Session>[]>(() => {
     if (unit !== 'sessions') return [];
-    const sessions = data.sessions.slice().sort((a, b) => compare(a, b, sort));
+    const sessions = data.sessions.slice().sort((a, b) => compareSessions(a, b, sort));
     // Search keeps matching sessions plus their ancestor context visible.
     return buildSessionTree(
       sessions,
@@ -252,35 +259,43 @@ export function Sessions({ data, onSelect }: { data: Overview; onSelect: (s: Sel
         费用可能为来源记录成本、账号范围下的免费自动审查或按当前公开 API
         列表价估算，非实际账单；未记录缓存写入时按无单独计费写入估算，
         未还原请求级长上下文加价、服务等级或工具附加费。未知模型或用量不参与估算。缓存和推理不重复计入
-        Token 总量；{coverageText(data.summary.request_coverage)}。时间按{' '}
+        Token 总量；{coverageText(data.summary.request_coverage)}
+        。会话行的轮次、工具记录、Token、缓存与费用包含该会话的全部子代理会话；展开后父行与子行是嵌套包含关系，不能相加；父子用量可能重叠时按观测未去重小计显示。时间按{' '}
         {Intl.DateTimeFormat().resolvedOptions().timeZone} 显示。
       </p>
     </section>
   );
 }
 
-function compare(a: Turn | Session, b: Turn | Session, sort: Sort): number {
-  if (sort === 'cache') {
-    const cache = (row: Turn | Session) =>
-      ('cache_usage' in row ? row.cache_usage.cached_input_known : row.cached_input_tokens) ?? -1;
-    return cache(b) - cache(a);
-  }
-  if (sort === 'cost') {
-    const cost = (row: Turn | Session) =>
-      ('estimated_cost_known' in row ? row.estimated_cost_known : row.estimated_cost) ?? -1;
-    return cost(b) - cost(a);
-  }
+function compareTurns(a: Turn, b: Turn, sort: Sort): number {
+  if (sort === 'cache') return (b.cached_input_tokens ?? -1) - (a.cached_input_tokens ?? -1);
+  if (sort === 'cost')
+    return (
+      (('estimated_cost_known' in b ? b.estimated_cost_known : b.estimated_cost) ?? -1) -
+      (('estimated_cost_known' in a ? a.estimated_cost_known : a.estimated_cost) ?? -1)
+    );
   if (sort === 'tokens')
     return (
       (b.token_total ?? ('token_known' in b ? b.token_known : null) ?? -1) -
       (a.token_total ?? ('token_known' in a ? a.token_known : null) ?? -1)
     );
-  if (sort === 'turns') return toolCount(b) - toolCount(a);
+  if (sort === 'turns')
+    return (b.tools_count ?? b.tools?.length ?? 0) - (a.tools_count ?? a.tools?.length ?? 0);
   return String(b.started_at ?? '').localeCompare(String(a.started_at ?? ''));
 }
 
-function toolCount(row: Turn | Session): number {
-  return 'turns' in row ? row.turns : (row.tools_count ?? row.tools?.length ?? 0);
+/** Session sorting ranks whole-subtree totals so parents include their sub-agents. */
+function compareSessions(a: Session, b: Session, sort: Sort): number {
+  const left = sessionAggregate(a);
+  const right = sessionAggregate(b);
+  if (sort === 'cache')
+    return (
+      (right.cache_usage.cached_input_known ?? -1) - (left.cache_usage.cached_input_known ?? -1)
+    );
+  if (sort === 'cost') return (aggregateCostKnown(right) ?? -1) - (aggregateCostKnown(left) ?? -1);
+  if (sort === 'tokens') return aggregateTokenSortValue(right) - aggregateTokenSortValue(left);
+  if (sort === 'turns') return right.turns - left.turns;
+  return String(b.started_at ?? '').localeCompare(String(a.started_at ?? ''));
 }
 
 function TurnIdentity({
@@ -497,13 +512,18 @@ function SessionTable({
         {rows.map((entry) => {
           if (entry.kind === 'session') {
             const s = entry.session;
+            // Session rows show whole-subtree totals, including descendant sub-agents.
+            const aggregate = sessionAggregate(s);
+            const cache = aggregate.cache_usage;
+            const tokenKnown = aggregateTokenKnown(aggregate);
+            const costKnown = aggregateCostKnown(aggregate);
             const isExpanded = expanded.has(s.id);
             const childCount = entry.childSessions.length;
             const firstTurn = firstTurns.get(s.id);
             return (
               <tr
                 key={s.id}
-                className={`workspace-row session-row${isExpanded ? ' is-expanded' : ''}`}
+                className={`workspace-row session-row${s.parent_id ? ' subagent-row' : ''}${isExpanded ? ' is-expanded' : ''}`}
                 style={workspaceColor(s)}
                 data-session-id={s.id}
                 data-parent-session-id={s.parent_id || undefined}
@@ -550,43 +570,47 @@ function SessionTable({
                     <span className="muted">—</span>
                   )}
                 </td>
-                <td>{formatNumber(s.turns)}</td>
+                <td>{formatNumber(aggregate.turns)}</td>
                 <td>
-                  {formatNumber(s.tools)}
+                  {formatNumber(aggregate.tools)}
                   <small className="sub">已观察记录</small>
                 </td>
                 <td>
-                  {formatNumber(s.token_known)}
+                  {formatNumber(tokenKnown)}
                   <small className="sub">
-                    {s.token_samples}/{s.turns} 轮有效
+                    {aggregate.token_samples}/{aggregate.turns} 轮有效
+                    {aggregate.aggregation_blocked ? ' · 观测未去重' : ''}
                   </small>
                 </td>
                 <td className="cache-cell">
-                  {formatNumber(s.cache_usage.cached_input_known)}
+                  {formatNumber(cache.cached_input_known)}
                   <small className="sub">
-                    占输入 {formatPercent(s.cache_usage.hit_rate)} · 配对 {s.cache_usage.samples}/
-                    {s.cache_usage.turns} 轮
-                    {!s.cache_usage.complete && s.cache_usage.samples > 0 ? ' · 已知小计' : ''}
+                    占输入 {formatPercent(cache.hit_rate)} · 配对 {cache.samples}/{cache.turns} 轮
+                    {!cache.complete && cache.samples > 0 ? ' · 已知小计' : ''}
+                    {cache.aggregation_blocked ? ' · 未去重' : ''}
                   </small>
                 </td>
                 <td className="cost-cell">
-                  {formatCost(s.estimated_cost_known)}
+                  {formatCost(costKnown)}
                   <small className="sub">
-                    {s.cost_samples}/{s.turns} 轮
-                    {s.cost_basis === 'recorded'
+                    {aggregate.cost_samples}/{aggregate.turns} 轮
+                    {aggregate.cost_basis === 'recorded'
                       ? '记录成本'
-                      : s.cost_basis === 'free'
+                      : aggregate.cost_basis === 'free'
                         ? '免费'
-                        : s.cost_basis === 'mixed'
+                        : aggregate.cost_basis === 'mixed'
                           ? '记录/估算/免费'
                           : '可估算'}
-                    {s.estimated_cost == null && s.estimated_cost_known != null
+                    {!aggregate.aggregation_blocked &&
+                    aggregateCostComplete(aggregate) == null &&
+                    costKnown != null
                       ? ' · 已知小计'
                       : ''}
-                    {s.request_coverage && (
+                    {aggregate.aggregation_blocked ? ' · 观测未去重' : ''}
+                    {aggregate.request_coverage && (
                       <>
                         <br />
-                        {coverageText(s.request_coverage)}
+                        {coverageText(aggregate.request_coverage)}
                       </>
                     )}
                   </small>

@@ -118,6 +118,28 @@ export interface Session {
   parent_id: string | null;
   source: string;
   instance: string;
+  /** Whole-subtree totals: this session plus all descendant sub-agent sessions. */
+  subtree?: SessionSubtree;
+}
+export interface SessionSubtree {
+  turns: number;
+  tools: number;
+  token_total: Metric;
+  token_known: Metric;
+  observed_token_total?: Metric;
+  observed_token_known?: Metric;
+  token_samples: number;
+  cache_usage: CacheUsage;
+  estimated_cost: Metric;
+  estimated_cost_known: Metric;
+  observed_estimated_cost_known?: Metric;
+  cost_samples: number;
+  cost_basis?: Session['cost_basis'];
+  recorded_cost?: Metric;
+  recorded_cost_known?: Metric;
+  recorded_cost_samples?: number;
+  request_coverage?: RequestCoverage;
+  aggregation_blocked: boolean;
 }
 export interface Summary {
   request_coverage?: RequestCoverage;

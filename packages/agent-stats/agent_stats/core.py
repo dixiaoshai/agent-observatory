@@ -87,6 +87,41 @@ def _account_scope(session):
     return {'account_scoped': True} if session.get('account_scoped') is True else {}
 
 
+def _subtree_members(session_id, children):
+    """Visit a session and every descendant session once, without recursing."""
+    members, pending, seen = [], [session_id], set()
+    while pending:
+        current = pending.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        members.append(current)
+        pending.extend(children.get(current, ()))
+    return members
+
+
+def _subtree_blocked(members, turns, parents, accounting, legacy_sessions):
+    """A subtree total is only safe when every parent/child pair is verified.
+
+    Mirrors the query-level blocked rule, scoped to the sessions in this
+    subtree: old imports, uncertain fork attribution, or a parent/child pair
+    without per-session accounting can overlap and must stay an observed
+    subtotal. A lone session without verified accounting stays usable because
+    there is no combined total to double count.
+    """
+    member_set = set(members)
+    if any(member in legacy_sessions for member in members):
+        return True
+    if any(turn.get('usage_attribution_uncertain') for turn in turns):
+        return True
+    for member in members:
+        parent = parents.get(member)
+        if parent in member_set and (accounting.get(member) != 'per_session' or
+                                     accounting.get(parent) != 'per_session'):
+            return True
+    return False
+
+
 def _workspace_home(explicit, env, default, enabled):
     if explicit is None and not enabled:
         return None
@@ -274,6 +309,7 @@ class Store:
         sessions, warnings = self._all()
         sessions_by_id = {s['id']: s for s in sessions}
         turns, visible_sessions, visible_accounting = [], [], {}
+        turns_by_session, legacy_sessions = {}, set()
         legacy_accounting = False
         for s in sessions:
             subset = [estimate_turn(dict(t, sequence=t.get('sequence') or sequence, session_id=s['id'], session_title=s.get('title'), session_native_id=s.get('native_id'), project=s.get('project'), project_name=s.get('project_name'), source=s['source'], **_parent_turn_fields(t, s, sessions_by_id), **_account_scope(s))) for sequence, t in enumerate(s['turns'], 1) if _matches(t, s, f)]
@@ -282,10 +318,14 @@ class Store:
             if not subset and (any(f.get(k) for k in ('start', 'end', 'model')) or not session_match):
                 continue
             turns.extend(subset)
+            turns_by_session[s['id']] = subset
             visible_accounting[s['id']] = s.get('usage_accounting')
             # Old imports did not retain fork identities. They cannot be safely
             # combined until reparsed, even if no parent relation was stored.
-            legacy_accounting |= bool(s.get('source_path') and 'usage_accounting' not in s)
+            legacy = bool(s.get('source_path') and 'usage_accounting' not in s)
+            legacy_accounting |= legacy
+            if legacy:
+                legacy_sessions.add(s['id'])
             total, known, samples = _sum_known(subset)
             models = sorted(set(t.get('model') or '未知' for t in subset))
             visible_sessions.append({**{k: s.get(k) for k in ('id', 'native_id', 'title', 'project', 'project_name', 'started_at', 'status', 'parent_id', 'source', 'instance')},
@@ -297,6 +337,42 @@ class Store:
             prefix = s.get('source_path', '')
             warnings.extend((prefix + ': ' if prefix else '') + w for w in s.get('warnings', []))
         ids = {s['id'] for s in visible_sessions}
+        # Session rows show the whole session tree: a parent row must roll up
+        # every descendant sub-agent session, not just its own turns. Each
+        # subtree is aggregated with the same helpers as the summary, and is
+        # withheld when its own parent/child accounting is unverified.
+        parents = {s['id']: (s['parent_id'] if isinstance(s.get('parent_id'), str)
+                             and s['parent_id'] in ids and s['parent_id'] != s['id'] else None)
+                   for s in visible_sessions}
+        children = {}
+        for session_id, parent in parents.items():
+            if parent is not None:
+                children.setdefault(parent, []).append(session_id)
+        for session in visible_sessions:
+            # Only sessions with descendants need a rollup; a leaf row already
+            # equals its own aggregates. Keeping the payload small matters for
+            # the multi-megabyte overview response.
+            if not children.get(session['id']):
+                continue
+            members = _subtree_members(session['id'], children)
+            rows = [turn for member in members for turn in turns_by_session.get(member, ())]
+            subtree_blocked = _subtree_blocked(
+                members, rows, parents, visible_accounting, legacy_sessions)
+            total, known, samples = _sum_known(rows)
+            session['subtree'] = {
+                'sessions': len(members),
+                'turns': len(rows),
+                'tools': sum(len(turn['tools']) for turn in rows),
+                'token_total': None if subtree_blocked else total,
+                'token_known': None if subtree_blocked else known,
+                'observed_token_total': total,
+                'observed_token_known': known,
+                'token_samples': samples,
+                **aggregate_cost(rows, subtree_blocked),
+                'cache_usage': aggregate_cache(rows, subtree_blocked),
+                'aggregation_blocked': subtree_blocked,
+            }
+
         blocked = legacy_accounting or any(t.get('usage_attribution_uncertain') for t in turns) or any(s.get('parent_id') in ids and
                       (visible_accounting[s['id']] != 'per_session' or
                        visible_accounting[s['parent_id']] != 'per_session')

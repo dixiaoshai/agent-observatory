@@ -1119,14 +1119,26 @@ details p {
 .detail-table tbody .workspace-row.session-turn-row {
   background: hsl(var(--workspace-hue) var(--workspace-saturation) 96%);
 }
-.detail-table tbody .workspace-row.subagent-row {
-  background: hsl(var(--workspace-hue) var(--workspace-saturation) 94%);
-}
 .detail-table tbody .workspace-row.session-row.is-expanded {
   background: hsl(var(--workspace-hue) var(--workspace-saturation) 88%);
 }
+/* Sub-agent rows keep the light turn-row shade; indentation and the sub-agent
+   badge carry the nesting, so they match the rounds above instead of looking
+   like another top-level session. */
+.detail-table tbody .workspace-row.subagent-row {
+  background: hsl(var(--workspace-hue) var(--workspace-saturation) 96%);
+}
+.detail-table tbody .workspace-row.session-row.subagent-row {
+  background: hsl(var(--workspace-hue) var(--workspace-saturation) 96%);
+}
 .detail-table tbody .workspace-row:hover {
   background: hsl(var(--workspace-hue) var(--workspace-saturation) 86%);
+}
+.detail-table tbody .workspace-row.subagent-row:hover {
+  background: hsl(var(--workspace-hue) var(--workspace-saturation) 92%);
+}
+.detail-table tbody .workspace-row.session-row.subagent-row:hover {
+  background: hsl(var(--workspace-hue) var(--workspace-saturation) 92%);
 }
 .workspace-row .project-name {
   border-left-color: hsl(var(--workspace-hue) 35% 55%);

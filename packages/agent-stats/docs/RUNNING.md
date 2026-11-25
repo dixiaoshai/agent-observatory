@@ -170,6 +170,7 @@ python3 -m venv .venv
 - `codex-auto-review` 没有公开列表价：仅当来源标记会话为账号范围（`account_scoped=true`）且轮次开始时间不早于 `2026-10-06T00:00:00Z` 时按免费规则显示 0（`cost_basis=free`、`cost_source=free_waiver`），其他情况保留未知。该标记来自 Codex `creator_account_id` 的布尔含义，也可能来自 Agent 身份 / PAT，日志无法区分登录方式；缺失表示未知，不按 API Key 处理。
 - `token_total` 仅在当前范围全部轮次有有效值时返回完整合计；`token_known` 是有效轮次的已知小计，无有效样本返回 `null`。父子会话同时在范围内但包含关系不明时，联合金额返回 `null`，各会话独立值仍可查。
 - `observed_token_total` / `observed_token_known` 是各会话轮次观测值的直接相加，未对父子包含关系去重；页面用“会话观测 Token”“各会话观测小计（未去重）”标注，不能视为实际联合用量。缺失仍为 `null`，不补零。
+- `/api/overview` 中带后代子代理会话的会话有 `subtree`（叶子会话不重复下发，沿用自身字段）：当前筛选范围内该会话及其全部后代子代理会话的轮次、工具、Token、缓存与费用聚合，字段与 summary 同口径（`turns`、`tools`、`token_*`、`cache_usage`、`estimated_cost*`、`cost_samples`、`cost_basis`、`request_coverage` 等）。子树的父子包含关系无法核实、含旧采集或观测归属不确定时 `subtree.aggregation_blocked=true`，`token_total` / `token_known` / `estimated_cost` / `estimated_cost_known` 返回 `null`，`observed_*` 保留未去重观测小计；各轮明细的会话行显示该合计并按此标注。
 - 分位数使用 Hyndman-Fan type 7 线性插值，只计算有效轮次，并附有效 / 总样本数；工具字节数不换算 Token 或费用。
 - 缓存占输入按同批有效配对轮次的缓存读取总量 / 输入总量计算，并标注配对覆盖；它是 Token 比例，不是请求命中率。缺失分类不补零，零输入时比例未知；缓存写入按来源字段单独展示，不混入读取比例。
 - `token_count` 中 `info: null` 且带非空 `rate_limits` 的事件只更新限额，不代表缺少用量；真正无有效累计值的用量记录仍会提示，并保留文件与行号定位。
@@ -179,7 +180,7 @@ python3 -m venv .venv
 
 | 接口 | 行为 |
 | --- | --- |
-| `GET /api/overview` | 同口径的 summary、sessions、turns、模型分组、每日趋势、coverage、warnings、last_import；turns 只带 `tools_count` 与 `tool_output_bytes` 聚合 |
+| `GET /api/overview` | 同口径的 summary、sessions（每个会话带含后代子代理的 `subtree` 聚合）、turns、模型分组、每日趋势、coverage、warnings、last_import；turns 只带 `tools_count` 与 `tool_output_bytes` 聚合 |
 | `GET /api/session?id=...` | 指定带命名空间的会话及轮次、工具和事件定位；只读取目标会话及其直接父会话，不扫描整库 |
 | `GET /api/session-content?id=...` | 按需只读 Trace 正文；可选 native `turn_id`、`after`（默认 0）、`limit`（默认 50，最多 100）；续页传回 `archive_id` 与 `revision`，已加载内容变更时返回 409 要求重载 |
 | `GET /api/session-content/blob?id=...&event_id=...&pointer=...` | 读取当前会话事件 body 中 JSON pointer 指向的外置正文，校验固定目录、常规文件、大小与 SHA-256；不接受浏览器文件路径，最多 16 MiB |
